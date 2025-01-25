@@ -313,14 +313,24 @@ namespace Ink
             return null;
         }
 
+        /// <summary>
+        /// Successive dot access ( a.b.c )
+        /// </summary>
+        /// <returns></returns>
+        protected List<Identifier> DotAccessCall()
+        {
+            ParseRule dots = Exclude(String("."));
+            return Interleave<Identifier>(IdentifierWithMetadata, dots);
+        }
+
         protected Expression ExpressionFunctionCall()
         {
-            var iden = Parse(IdentifierWithMetadata);
-            if (iden == null)
+            var iden = Parse(DotAccessCall);
+            if (iden == null || iden.Count == 0)
                 return null;
 
             Whitespace ();
-
+            
             var arguments = Parse(ExpressionFunctionCallArguments);
             if (arguments == null) {
                 return null;

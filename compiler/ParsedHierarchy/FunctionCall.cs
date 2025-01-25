@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 
 namespace Ink.Parsed
 {
@@ -19,9 +19,9 @@ namespace Ink.Parsed
 
         public bool shouldPopReturnedValue;
 
-        public FunctionCall (Identifier functionName, List<Expression> arguments)
+        public FunctionCall (List<Identifier> functionCallIdentifiers, List<Expression> arguments)
         {
-            _proxyDivert = new Parsed.Divert(new Path(functionName), arguments);
+            _proxyDivert = new Parsed.Divert(new Path(functionCallIdentifiers), arguments);
             _proxyDivert.isFunctionCall = true;
             AddContent (_proxyDivert);
         }
