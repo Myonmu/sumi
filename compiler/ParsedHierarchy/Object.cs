@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Text;
 
 namespace Ink.Parsed
@@ -227,24 +227,37 @@ namespace Ink.Parsed
         }
 
         public delegate bool FindQueryFunc<T>(T obj);
-        public T Find<T>(FindQueryFunc<T> queryFunc = null) where T : class
+        
+        /// <summary>
+        /// Finds the specific token in children scope.
+        /// By default searches recursively (nested)
+        /// </summary>
+        /// <param name="queryFunc"></param>
+        /// <param name="nested">when false, only searches immediate children</param>
+        /// <typeparam name="T"></typeparam>
+        /// <returns></returns>
+        public T Find<T>(FindQueryFunc<T> queryFunc = null, bool nested = true) where T : class
         {
             var tObj = this as T;
-            if (tObj != null && (queryFunc == null || queryFunc (tObj) == true)) {
+            if (tObj != null && (queryFunc == null || queryFunc(tObj) == true))
+            {
                 return tObj;
             }
 
             if (content == null)
                 return null;
 
-            foreach (var obj in content) {
-                var nestedResult = obj.Find (queryFunc);
-                if (nestedResult != null)
-                    return nestedResult;
+            if (nested)
+            {       
+                foreach (var obj in content)
+                {
+                    var nestedResult = obj.Find(queryFunc);
+                    if (nestedResult != null)
+                        return nestedResult;
+                }
             }
-
             return null;
-        }
+    }
 
 
         public List<T> FindAll<T>(FindQueryFunc<T> queryFunc = null) where T : class

@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 
 namespace Ink.Parsed
 {
@@ -180,7 +180,7 @@ namespace Ink.Parsed
 
             // Non-functon: Make sure knots and stitches don't attempt to use Return statement
             else if( flowLevel == FlowLevel.Knot || flowLevel == FlowLevel.Stitch ) {
-                foundReturn = Find<Return> ();
+                foundReturn = Find<Return> (nested:false);
                 if (foundReturn != null) {
                     Error ("Return statements can only be used in knots that are declared as functions: == function " + this.identifier + " ==", foundReturn);
                 }
@@ -218,7 +218,8 @@ namespace Ink.Parsed
 
                     // First inner stitch - automatically step into it
                     // 20/09/2016 - let's not auto step into knots
-                    if (contentIdx == 0 && !childFlow.hasParameters
+                    // 25/01/2025 stitches can be functions now, prevent auto-step into function stitches
+                    if (contentIdx == 0 && !childFlow.hasParameters && !childFlow.isFunction
                         && this.flowLevel == FlowLevel.Knot) {
                         _startingSubFlowDivert = new Runtime.Divert ();
                         container.AddContent(_startingSubFlowDivert);
@@ -372,9 +373,11 @@ namespace Ink.Parsed
 
         void CheckForDisallowedFunctionFlowControl()
         {
+            /*
             if (!(this is Knot)) {
                 Error ("Functions cannot be stitches - i.e. they should be defined as '== function myFunc ==' rather than public to another knot.");
             }
+            */
 
             // Not allowed sub-flows
             foreach (var subFlowAndName in _subFlowsByName) {

@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using Ink.Parsed;
 using System.Linq;
 
@@ -112,6 +112,7 @@ namespace Ink
             Whitespace ();
 
             // Stitches aren't allowed to be functions, but we parse it anyway and report the error later
+            // ... that is no longer. Stitches can now be functions
             bool isFunc = ParseString ("function") != null;
             if ( isFunc ) {
                 Whitespace ();
