@@ -1,4 +1,30 @@
-# ink
+# Sumi ~ an ink fork with extra features
+
+**Sumi** is an ink fork that adds advanced features to ink. These features include:
+
+1. Ability to define function stitches. The original ink forbids using stitches as functions. In Sumi, you could call a stitch function via `knot.stitchFunction(...)`, similar to how member functions are called in other languages. (note: there's no such thing as stitch in a stitch, so the maximum depth you can have is 1)
+
+2. Use preprocessor directives (conditional compilation). For example:
+```ink
+#IF INKY
+This will only be shown in Inky.
+#ELIF UNITY
+This will only be shown in Unity.
+#ELSE
+This will be shown if not in Inky nor Unity.
+#ENDIF
+```
+This is helpful if you are including libraries that might have different paths when editing with Inky and in runtime, or debug content.
+```ink
+#IF INKY
+#INCLUDE "../InkLibs/Library.ink"
+#ELSE
+#INCLUDE "Library.ink"
+#ENDIF
+```
+
+---
+
 
 [![CI Status](http://img.shields.io/travis/inkle/ink.svg?style=flat)](https://travis-ci.org/inkle/ink)
 

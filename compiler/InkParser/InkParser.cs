@@ -1,17 +1,31 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
+using System.Text;
 
 namespace Ink
 {
-    public partial class InkParser : StringParser
+    public partial class InkParser : BaseParser
     {
-        public InkParser(string str, string filenameForMetadata = null, Ink.ErrorHandler externalErrorHandler = null, IFileHandler fileHandler = null)
-            : this(str, filenameForMetadata, externalErrorHandler, null, fileHandler)
+        public InkParser(string str,
+            string filenameForMetadata = null, 
+            Ink.ErrorHandler externalErrorHandler = null, 
+            IFileHandler fileHandler = null, 
+            HashSet<string> preprocessorDirectives = null)
+            : this(str, filenameForMetadata, externalErrorHandler, null, fileHandler, preprocessorDirectives)
         {  }
 
-        InkParser(string str, string inkFilename = null, Ink.ErrorHandler externalErrorHandler = null, InkParser rootParser = null, IFileHandler fileHandler = null) : base(str) {
+        InkParser(string str, 
+            string inkFilename = null, 
+            Ink.ErrorHandler externalErrorHandler = null, 
+            InkParser rootParser = null, 
+            IFileHandler fileHandler = null, 
+            HashSet<string> preprocessorDirectives = null) : base(str, true) {
+            
+            _preprocessorDirectives = preprocessorDirectives;
             _filename = inkFilename;
+            
+            PreProcess(str);
+            
             RegisterExpressionOperators ();
             GenerateStatementLevelRules ();
 
@@ -86,10 +100,34 @@ namespace Ink
             return allElements;
         }
 
+        private void PrintWithLineNumber(string s)
+        {
+            var lineNum = 1;
+            var lastIndex = 0;
+            var lineBreakIndex = 0;
+            
+            var sb = new StringBuilder($"{lineNum}> ");
+            while (true)
+            {
+                lineBreakIndex = s.IndexOf('\n', lastIndex);
+                if (lineBreakIndex < 0) break;
+                sb.Append(s.Substring(lastIndex, lineBreakIndex - lastIndex + 1));
+                lineNum++;
+                sb.Append($"{lineNum}> ");
+                lastIndex = lineBreakIndex + 1;
+            }
+            Console.WriteLine("\n\n\n\n================================================");
+            Console.WriteLine(sb.ToString());
+            Console.WriteLine("================================================\n\n\n\n");
+        }
+
         protected override string PreProcessInputString(string str)
         {
+            PrintWithLineNumber(str);
             var inputWithCommentsRemoved = (new CommentEliminator (str)).Process();
-            return inputWithCommentsRemoved;
+            var inputWithPreprocessorResolved = (new InkPreprocessor(inputWithCommentsRemoved, _preprocessorDirectives)).Process();
+            PrintWithLineNumber(inputWithPreprocessorResolved);
+            return inputWithPreprocessorResolved;
         }
 
         protected Runtime.DebugMetadata CreateDebugMetadata(StringParserState.Element stateAtStart, StringParserState.Element stateAtEnd)
@@ -177,6 +215,8 @@ namespace Ink
         Ink.ErrorHandler _externalErrorHandler;
 
         string _filename;
+        
+        HashSet<string> _preprocessorDirectives;
     }
 }
 
