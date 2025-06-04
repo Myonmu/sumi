@@ -107,6 +107,7 @@ namespace Ink
                 compiler = new Compiler (inputString, new Compiler.Options {
                     sourceFilename = opts.inputFile,
                     pluginDirectories = pluginDirectories,
+                    preprocessorDirectives = preprocessorDirectives,
                     countAllVisits = opts.countAllVisits,
                     errorHandler = OnError
                 });
@@ -311,9 +312,11 @@ namespace Ink
 
 			opts = new Options();
             pluginDirectories = new List<string> ();
+            preprocessorDirectives = new HashSet<string> ();
 
             bool nextArgIsOutputFilename = false;
             bool nextArgIsPluginDirectory = false;
+            bool nextArgIsPreprocessorDirective = false;
 
 			// Process arguments
             int argIdx = 0;
@@ -325,6 +328,10 @@ namespace Ink
                 } else if (nextArgIsPluginDirectory) {
                     pluginDirectories.Add (arg);
                     nextArgIsPluginDirectory = false;
+                } else if (nextArgIsPreprocessorDirective)
+                {
+                    preprocessorDirectives.Add(arg);
+                    nextArgIsPreprocessorDirective = false;
                 }
 
 				// Options
@@ -359,6 +366,9 @@ namespace Ink
                         case 'k':
                             opts.keepOpenAfterStoryFinish = true;
                             break;
+                        case 'd':
+                            nextArgIsPreprocessorDirective = true;
+                            break;
                         default:
                             Console.WriteLine ("Unsupported argument type: '{0}'", argChar);
                             break;
@@ -379,6 +389,7 @@ namespace Ink
 
         Options opts;
         List<string> pluginDirectories;
+        HashSet<string> preprocessorDirectives;
 
         List<string> _errors = new List<string>();
         List<string> _warnings = new List<string>();

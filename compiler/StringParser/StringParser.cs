@@ -14,19 +14,28 @@ namespace Ink
 
         public delegate void ErrorHandler(string message, int index, int lineIndex, bool isWarning);
 
-		public StringParser (string str)
+		public StringParser (string str, bool manuallyCallPreprocess = false)
 		{
-            str = PreProcessInputString (str);
+			// SUMI: we need more control on the init sequence.
+			if (!manuallyCallPreprocess)
+			{
+				PreProcess(str);
+			}
+		}
 
-            state = new StringParserState();
-
-            if (str != null) {
-                _chars = str.ToCharArray ();
-            } else {
-                _chars = new char[0];
-            }
-
-			inputString = str;
+		protected void PreProcess(string str)
+		{
+			 str = PreProcessInputString (str);
+            
+			 state = new StringParserState();
+            
+			 if (str != null) {
+				 _chars = str.ToCharArray ();
+			 } else {
+				 _chars = new char[0];
+			 }
+            
+			 inputString = str;
 		}
 
 		public class ParseSuccessStruct {};

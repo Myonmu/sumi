@@ -3,6 +3,8 @@ using System.IO;
 using System.Collections.Generic;
 using System.Diagnostics;
 using Ink;
+using Ink.Runtime;
+using Path = System.IO.Path;
 
 
 class InkTestBed
@@ -29,6 +31,7 @@ class InkTestBed
         if (story == null) return;
 
         while (story.canContinue || story.currentChoices.Count > 0) {
+            JsonRoundtrip();
             if (story.canContinue)
                 ContinueMaximally ();
 
@@ -94,7 +97,11 @@ class InkTestBed
     Ink.Runtime.Story Compile (string inkSource)
     {
     	compiler = new Compiler (inkSource, new Compiler.Options {
-    		errorHandler = OnError
+    		errorHandler = OnError,
+            preprocessorDirectives = new()
+            {
+                "INK_TEST"
+            }
     	});
 
     	story = compiler.Compile ();
@@ -118,7 +125,11 @@ class InkTestBed
         return new Compiler(inkSource, new Compiler.Options
         {
             sourceFilename = filename,
-            errorHandler = OnError
+            errorHandler = OnError,
+            preprocessorDirectives = new()
+            {
+                "INK_TEST"
+            }
         });
     }
 

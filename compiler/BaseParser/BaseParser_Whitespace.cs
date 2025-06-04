@@ -2,7 +2,7 @@
 
 namespace Ink
 {
-	public partial class InkParser
+	public partial class BaseParser
 	{
 		// Handles both newline and endOfFile
 		protected object EndOfLine()
