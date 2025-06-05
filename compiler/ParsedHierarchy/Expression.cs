@@ -51,7 +51,7 @@ namespace Ink.Parsed
         Runtime.Container _prototypeRuntimeConstantExpression;
 	}
 
-	public class BinaryExpression : Expression
+	public class BinaryExpression : Expression, IPreprocessorEvaluable
 	{
 		public Expression leftExpression;
 		public Expression rightExpression;
@@ -121,9 +121,23 @@ namespace Ink.Parsed
         {
             return string.Format ("({0} {1} {2})", leftExpression, opName, rightExpression);
         }
-	}
+        public bool PreprocessorEvaluate(HashSet<string> enabledSymbols)
+        {
+            if (opName == "&&")
+            {
+                return (leftExpression as IPreprocessorEvaluable).PreprocessorEvaluate(enabledSymbols)
+                    && (rightExpression as IPreprocessorEvaluable).PreprocessorEvaluate(enabledSymbols);
+            }
+            if (opName == "||")
+            {
+                return (leftExpression as IPreprocessorEvaluable).PreprocessorEvaluate(enabledSymbols)
+                    || (rightExpression as IPreprocessorEvaluable).PreprocessorEvaluate(enabledSymbols);
+            }
+            return false;
+        }
+    }
 
-    public class UnaryExpression : Expression
+    public class UnaryExpression : Expression, IPreprocessorEvaluable
 	{
 		public Expression innerExpression;
         public string op;
@@ -177,6 +191,14 @@ namespace Ink.Parsed
         public override string ToString ()
         {
             return nativeNameForOp + innerExpression;
+        }
+        public bool PreprocessorEvaluate(HashSet<string> enabledSymbols)
+        {
+            if (op == "!" && innerExpression is IPreprocessorEvaluable preprocessorEvaluable)
+            {
+                return !preprocessorEvaluable.PreprocessorEvaluate(enabledSymbols);
+            }
+            return false;
         }
 
         string nativeNameForOp

@@ -99,7 +99,7 @@ namespace Ink
 
             return allElements;
         }
-
+        
         private void PrintWithLineNumber(string s)
         {
             var lineNum = 1;
@@ -123,10 +123,10 @@ namespace Ink
 
         protected override string PreProcessInputString(string str)
         {
-            PrintWithLineNumber(str);
+            //PrintWithLineNumber(str);
             var inputWithCommentsRemoved = (new CommentEliminator (str)).Process();
             var inputWithPreprocessorResolved = (new InkPreprocessor(inputWithCommentsRemoved, _preprocessorDirectives)).Process();
-            PrintWithLineNumber(inputWithPreprocessorResolved);
+            //PrintWithLineNumber(inputWithPreprocessorResolved);
             return inputWithPreprocessorResolved;
         }
 

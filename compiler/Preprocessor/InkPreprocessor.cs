@@ -6,37 +6,35 @@ namespace Ink
     /// Sumi added text preprocess directive processor.
     /// Works similarly to c#'s "#if...#elif...#else...#endif" statements.
     /// The implementation is not complete, as we do not support:
-    ///  - logical operators ( #IF A && B || C || !D)
     ///  - directive inside directive ( #IF A ... #IF B ... #ENDIF #ENDIF )
     /// </summary>
-    public class InkPreprocessor : BaseParser
+    public partial class InkPreprocessor : BaseParser
     {
-        class PreprocessorBlock
+        class PreprocessorBranch
         {
             public int startLine; // includes #IF
             public int endLine; // does not include the closing directive
-            public int actualContentStartIndex;
-            public int actualContentEndIndex;
-            public string directives;
+            public int contentStartIndex;
+            public int contentEndIndex;
+            public IPreprocessorEvaluable expression;
 
-            public bool Match(HashSet<string> enabledDirectives)
+            public bool Match(HashSet<string> enabledSymbols)
             {
-                return string.IsNullOrEmpty(directives) ||
-                       enabledDirectives != null &&
-                       enabledDirectives.Contains(directives);
+                return expression == null || expression.PreprocessorEvaluate(enabledSymbols);
             }
         }
 
-        private HashSet<string> _preprocessorDirectives;
-        private List<PreprocessorBlock> _preprocessorBlocks = new List<PreprocessorBlock>();
-        private int _preprocessorBlockEnd;
+        private HashSet<string> _enabledSymbols;
+        private List<PreprocessorBranch> _preprocessorBranches = new List<PreprocessorBranch>();
+        private int _preprocessorBlocksCount;
 
-        private int _startLine, _endLine, _contentStart, _contentEnd;
-        private string _currentDirectives;
+        private int _startLine, _endLine, _contentStartIndex, _contentEndIndex;
+        private IPreprocessorEvaluable _currentExpression;
         private bool _expectEndIf, _isClosed;
-        public InkPreprocessor(string source, HashSet<string> preprocessorDirectives) : base(source)
+        public InkPreprocessor(string source, HashSet<string> enabledSymbols) : base(source)
         {
-            _preprocessorDirectives = preprocessorDirectives;
+            _enabledSymbols = enabledSymbols;
+            RegisterExpressionOperators();
         }
 
         public string Process()
@@ -74,37 +72,37 @@ namespace Ink
         void RecordStart()
         {
             _startLine = lineIndex;
-            _contentStart = index;
+            _contentStartIndex = index;
         }
 
         void AddBlock()
         {
             _endLine = lineIndex + 1;
-            if (_preprocessorBlockEnd >= _preprocessorBlocks.Count)
+            if (_preprocessorBlocksCount >= _preprocessorBranches.Count)
             {
-                _preprocessorBlocks.Add(new PreprocessorBlock());
+                _preprocessorBranches.Add(new PreprocessorBranch());
             }
-            var block = _preprocessorBlocks[_preprocessorBlockEnd];
+            var block = _preprocessorBranches[_preprocessorBlocksCount];
             block.startLine = _startLine;
             block.endLine = _endLine;
-            block.actualContentStartIndex = _contentStart;
-            block.actualContentEndIndex = _contentEnd;
-            block.directives = _currentDirectives;
-            _preprocessorBlockEnd++;
+            block.contentStartIndex = _contentStartIndex;
+            block.contentEndIndex = _contentEndIndex;
+            block.expression = _currentExpression;
+            _preprocessorBlocksCount++;
         }
 
         string CreateResult()
         {
             var sb = new StringBuilder();
             var branchSelected = false;
-            for (int i = 0; i < _preprocessorBlockEnd; i++)
+            for (int i = 0; i < _preprocessorBlocksCount; i++)
             {
-                var block = _preprocessorBlocks[i];
-                if (!branchSelected && block.Match(_preprocessorDirectives))
+                var block = _preprocessorBranches[i];
+                if (!branchSelected && block.Match(_enabledSymbols))
                 {
                     branchSelected = true;
                     sb.Append('\n');
-                    for (int j = block.actualContentStartIndex; j < block.actualContentEndIndex; j++)
+                    for (int j = block.contentStartIndex; j < block.contentEndIndex; j++)
                     {
                         sb.Append(this.inputString[j]);
                     }
@@ -129,49 +127,41 @@ namespace Ink
             RecordStart();
         }
 
-        object ParseDirectives()
-        {
-            Whitespace();
-            _currentDirectives = ParseUntilCharactersFromCharSet(_whitespaceOrNewlineCharacters);
-            if (_currentDirectives == null) return null;
-            return ParseSuccess;
-        }
-
         object If()
         {
             if (ParseString(IF) == null) return null;
             _expectEndIf = false;
             _isClosed = false;
-            _preprocessorBlockEnd = 0;
-            if (ParseObject(ParseDirectives) == null) return null;
+            _preprocessorBlocksCount = 0;
+            if (ParseObject(ParsePreprocessorExpression) == null) return null;
             DirectiveEndOfLine();
             return ParseSuccess;
         }
 
         object Elif()
         {
-            _contentEnd = index;
+            _contentEndIndex = index;
             if (ParseString(ELIF) == null) return null;
             AddBlock();
-            if (ParseObject(ParseDirectives) == null) return null;
+            if (ParseObject(ParsePreprocessorExpression) == null) return null;
             DirectiveEndOfLine();
             return ParseSuccess;
         }
 
         object Else()
         {
-            _contentEnd = index;
+            _contentEndIndex = index;
             if (ParseString(ELSE) == null) return null;
             AddBlock();
             DirectiveEndOfLine();
             _expectEndIf = true;
-            _currentDirectives = null;
+            _currentExpression = null;
             return ParseSuccess;
         }
 
         object EndIf()
         {
-            _contentEnd = index;
+            _contentEndIndex = index;
             if (ParseString(ENDIF) == null) return null;
             AddBlock();
             DirectiveEndOfLine();
