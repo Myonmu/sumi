@@ -17,8 +17,9 @@ The syntax is similar to C# preprocessors:
 ```ink
 #IF INKY
 This will only be shown in Inky.
-#ELIF UNITY
-This will only be shown in Unity.
+// you may use logical expressions as well
+#ELIF ( UNITY && STEAM_BUILD ) || UNREAL
+This will only be shown in Unity Stem Build or in Unreal.
 #ELSE
 This will be shown if not in Inky nor Unity.
 #ENDIF
@@ -31,5 +32,21 @@ This is helpful if you are including libraries that might have different paths w
 #INCLUDE "Library.ink"
 #ENDIF
 ```
-`InkPreprocessor` will resolve these directives after comment removal, and before compiling the main content. Note that to keep line numbers intact, the preprocessor *replaces* masked out branches with line breaks, so you would end up with more empty line than you might expect. Always check if a line has printable content before showing it to the player. 
+`InkPreprocessor` will resolve these directives after comment removal, and before compiling the main content. To keep line numbers intact, the preprocessor *replaces* masked out branches with line breaks, so you would end up with more empty line than you might expect. Hence, always check if a line has printable content before showing it to the player. 
+
 > Caveat: The vanilla ink toolchain does not support preprocessor directives, so you will need to use a custom toolchain built from Sumi.
+
+To specify preprocessor defines passed to the compiler, you could pass them via the constructor of the compiler:
+
+```csharp
+var compiler = new Compiler (inkSource, new Compiler.Options {
+    preprocessorDirectives = new()
+    {
+        "SOME_DEFINE", "SOME_OTHER_DEFINE"
+    }
+});
+
+var story = compiler.Compile ();
+```
+
+Currently, if you make a mistake in preprocessor directives and result in a parse failure, the whole block will not be evaluated and all the directives will be treated as regular ink content (which will become tags).
