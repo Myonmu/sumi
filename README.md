@@ -40,7 +40,7 @@ To specify preprocessor defines passed to the compiler, you could pass them via 
 
 ```csharp
 var compiler = new Compiler (inkSource, new Compiler.Options {
-    preprocessorDirectives = new()
+    preprocessorSymbols = new()
     {
         "SOME_DEFINE", "SOME_OTHER_DEFINE"
     }

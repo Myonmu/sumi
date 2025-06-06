@@ -10,7 +10,7 @@ namespace Ink
         {
             public string sourceFilename;
             public List<string> pluginDirectories;
-            public HashSet<string> preprocessorDirectives;
+            public HashSet<string> preprocessorSymbols;
             public bool countAllVisits;
             public Ink.ErrorHandler errorHandler;
             public Ink.IFileHandler fileHandler;
@@ -32,7 +32,7 @@ namespace Ink
 
         public Parsed.Story Parse()
         {
-            _parser = new InkParser(_inputString, _options.sourceFilename, OnParseError, _options.fileHandler, _options.preprocessorDirectives);
+            _parser = new InkParser(_inputString, _options.sourceFilename, OnParseError, _options.fileHandler, _options.preprocessorSymbols);
             _parsedStory = _parser.Parse();
             return _parsedStory;
         }
