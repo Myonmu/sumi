@@ -10,6 +10,10 @@
 
 Usually these features are not required to make a game. We suggest that you get familiar with vanilla ink first then see if Sumi has features that seem interesting to you.
 
+## The Sumi Toolchain
+
+- [Sumy](https://github.com/Myonmu/sumy) : Inky but sumi compatible 
+
 ## Preprocessor Directives
 
 The syntax is similar to C# preprocessors:
