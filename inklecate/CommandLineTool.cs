@@ -107,7 +107,7 @@ namespace Ink
                 compiler = new Compiler (inputString, new Compiler.Options {
                     sourceFilename = opts.inputFile,
                     pluginDirectories = pluginDirectories,
-                    preprocessorDirectives = preprocessorDirectives,
+                    preprocessorSymbols = preprocessorSymbols,
                     countAllVisits = opts.countAllVisits,
                     errorHandler = OnError
                 });
@@ -312,11 +312,11 @@ namespace Ink
 
 			opts = new Options();
             pluginDirectories = new List<string> ();
-            preprocessorDirectives = new HashSet<string> ();
+            preprocessorSymbols = new HashSet<string> ();
 
             bool nextArgIsOutputFilename = false;
             bool nextArgIsPluginDirectory = false;
-            bool nextArgIsPreprocessorDirective = false;
+            bool nextArgIsPreprocessorSymbol = false;
 
 			// Process arguments
             int argIdx = 0;
@@ -328,10 +328,10 @@ namespace Ink
                 } else if (nextArgIsPluginDirectory) {
                     pluginDirectories.Add (arg);
                     nextArgIsPluginDirectory = false;
-                } else if (nextArgIsPreprocessorDirective)
+                } else if (nextArgIsPreprocessorSymbol)
                 {
-                    preprocessorDirectives.Add(arg);
-                    nextArgIsPreprocessorDirective = false;
+                    preprocessorSymbols.Add(arg);
+                    nextArgIsPreprocessorSymbol = false;
                 }
 
 				// Options
@@ -367,7 +367,7 @@ namespace Ink
                             opts.keepOpenAfterStoryFinish = true;
                             break;
                         case 'd':
-                            nextArgIsPreprocessorDirective = true;
+                            nextArgIsPreprocessorSymbol = true;
                             break;
                         default:
                             Console.WriteLine ("Unsupported argument type: '{0}'", argChar);
@@ -389,7 +389,7 @@ namespace Ink
 
         Options opts;
         List<string> pluginDirectories;
-        HashSet<string> preprocessorDirectives;
+        HashSet<string> preprocessorSymbols;
 
         List<string> _errors = new List<string>();
         List<string> _warnings = new List<string>();

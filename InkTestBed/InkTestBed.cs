@@ -98,7 +98,7 @@ class InkTestBed
     {
     	compiler = new Compiler (inkSource, new Compiler.Options {
     		errorHandler = OnError,
-            preprocessorDirectives = new()
+            preprocessorSymbols = new()
             {
                 "INK_TEST"
             }
@@ -126,7 +126,7 @@ class InkTestBed
         {
             sourceFilename = filename,
             errorHandler = OnError,
-            preprocessorDirectives = new()
+            preprocessorSymbols = new()
             {
                 "INK_TEST"
             }
