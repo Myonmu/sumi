@@ -38,7 +38,9 @@ namespace Ink
                 "   -s:              Print stats about story including word count in JSON format\n" +
                 "   -v:              Verbose mode - print compilation timings\n"+
                 "   -k:              Keep inklecate running in play mode even after story is complete\n" +
-                "   -x <directory>:              Import plugins for the compiler.");
+                "   -x <directory>:              Import plugins for the compiler.\n" +
+                "   -d <define>:     Adds a preprocessor symbol (you can have multiple -d)"
+                );
             Environment.Exit (ExitCodeError);
         }
 
