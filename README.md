@@ -12,7 +12,8 @@ Usually these features are not required to make a game. We suggest that you get 
 
 ## The Sumi Toolchain
 
-- [Sumy](https://github.com/Myonmu/sumy) : Inky but sumi compatible 
+- [Sumy](https://github.com/Myonmu/sumy) : Inky but sumi compatible
+- [Sumi Unity Integration](https://github.com/Myonmu/sumi-unity-integration)
 
 ## Preprocessor Directives
 
