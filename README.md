@@ -31,9 +31,9 @@ This will be shown if not in Inky nor Unity.
 This is helpful if you are including libraries that might have different paths when editing with Inky and in runtime, or debug content.
 ```ink
 #IF INKY
-#INCLUDE "../InkLibs/Library.ink"
+INCLUDE "../InkLibs/Library.ink"
 #ELSE
-#INCLUDE "Library.ink"
+INCLUDE "Library.ink"
 #ENDIF
 ```
 `InkPreprocessor` will resolve these directives after comment removal, and before compiling the main content. To keep line numbers intact, the preprocessor *replaces* masked out branches with line breaks, so you would end up with more empty line than you might expect. Hence, always check if a line has printable content before showing it to the player. 
