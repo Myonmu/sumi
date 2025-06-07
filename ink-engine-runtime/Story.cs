@@ -2014,7 +2014,7 @@ namespace Ink.Runtime
             arguments.Reverse ();
 
             // Run the function!
-            object funcResult = funcDef.function (arguments.ToArray());
+            object funcResult = funcDef.function (this, arguments.ToArray());
 
             // Convert return value (if any) to the a type that the ink engine can use
             Runtime.Object returnObj = null;
@@ -2033,7 +2033,7 @@ namespace Ink.Runtime
         /// from ink. Note that this version isn't necessary if you have a function
         /// with three arguments or less - see the overloads of BindExternalFunction.
         /// </summary>
-        public delegate object ExternalFunction(object[] args);
+        public delegate object ExternalFunction(Story story, object[] args);
 
         /// <summary>
         /// Most general form of function binding that returns an object
@@ -2115,13 +2115,13 @@ namespace Ink.Runtime
         /// of the function will not change), then you can pass 'true'. 
         /// Usually, you want to pass 'false', especially if you want some action 
         /// to be performed in game code when this function is called.</param>
-        public void BindExternalFunction(string funcName, Func<object> func, bool lookaheadSafe=false)
+        public void BindExternalFunction(string funcName, Func<Story, object> func, bool lookaheadSafe=false)
         {
 			Assert(func != null, "Can't bind a null function");
 
-            BindExternalFunctionGeneral (funcName, (object[] args) => {
+            BindExternalFunctionGeneral (funcName, (Story s ,object[] args) => {
                 Assert(args.Length == 0, "External function expected no arguments");
-                return func();
+                return func(s);
             }, lookaheadSafe);
         }
 
@@ -2139,13 +2139,13 @@ namespace Ink.Runtime
         /// of the function will not change), then you can pass 'true'. 
         /// Usually, you want to pass 'false', especially if you want some action 
         /// to be performed in game code when this function is called.</param>
-        public void BindExternalFunction(string funcName, Action act, bool lookaheadSafe=false)
+        public void BindExternalFunction(string funcName, Action<Story> act, bool lookaheadSafe=false)
         {
 			Assert(act != null, "Can't bind a null function");
 
-            BindExternalFunctionGeneral (funcName, (object[] args) => {
+            BindExternalFunctionGeneral (funcName, (Story s, object[] args) => {
                 Assert(args.Length == 0, "External function expected no arguments");
-                act();
+                act(s);
                 return null;
             }, lookaheadSafe);
         }
@@ -2164,13 +2164,13 @@ namespace Ink.Runtime
         /// of the function will not change), then you can pass 'true'. 
         /// Usually, you want to pass 'false', especially if you want some action 
         /// to be performed in game code when this function is called.</param>
-        public void BindExternalFunction<T>(string funcName, Func<T, object> func, bool lookaheadSafe=false)
+        public void BindExternalFunction<T>(string funcName, Func<Story, T, object> func, bool lookaheadSafe=false)
         {
 			Assert(func != null, "Can't bind a null function");
 
-            BindExternalFunctionGeneral (funcName, (object[] args) => {
+            BindExternalFunctionGeneral (funcName, (Story s, object[] args) => {
                 Assert(args.Length == 1, "External function expected one argument");
-                return func( (T)TryCoerce<T>(args[0]) );
+                return func( s, (T)TryCoerce<T>(args[0]) );
             }, lookaheadSafe);
         }
 
@@ -2188,13 +2188,13 @@ namespace Ink.Runtime
         /// of the function will not change), then you can pass 'true'. 
         /// Usually, you want to pass 'false', especially if you want some action 
         /// to be performed in game code when this function is called.</param>
-        public void BindExternalFunction<T>(string funcName, Action<T> act, bool lookaheadSafe=false)
+        public void BindExternalFunction<T>(string funcName, Action<Story, T> act, bool lookaheadSafe=false)
         {
 			Assert(act != null, "Can't bind a null function");
 
-            BindExternalFunctionGeneral (funcName, (object[] args) => {
+            BindExternalFunctionGeneral (funcName, (Story s , object[] args) => {
                 Assert(args.Length == 1, "External function expected one argument");
-                act( (T)TryCoerce<T>(args[0]) );
+                act( s, (T)TryCoerce<T>(args[0]) );
                 return null;
             }, lookaheadSafe);
         }
@@ -2214,13 +2214,13 @@ namespace Ink.Runtime
         /// of the function will not change), then you can pass 'true'. 
         /// Usually, you want to pass 'false', especially if you want some action 
         /// to be performed in game code when this function is called.</param>
-        public void BindExternalFunction<T1, T2>(string funcName, Func<T1, T2, object> func, bool lookaheadSafe = false)
+        public void BindExternalFunction<T1, T2>(string funcName, Func<Story, T1, T2, object> func, bool lookaheadSafe = false)
         {
 			Assert(func != null, "Can't bind a null function");
 
-            BindExternalFunctionGeneral (funcName, (object[] args) => {
+            BindExternalFunctionGeneral (funcName, (Story s , object[] args) => {
                 Assert(args.Length == 2, "External function expected two arguments");
-                return func(
+                return func(s,
                     (T1)TryCoerce<T1>(args[0]), 
                     (T2)TryCoerce<T2>(args[1])
                 );
@@ -2241,13 +2241,13 @@ namespace Ink.Runtime
         /// of the function will not change), then you can pass 'true'. 
         /// Usually, you want to pass 'false', especially if you want some action 
         /// to be performed in game code when this function is called.</param>
-        public void BindExternalFunction<T1, T2>(string funcName, Action<T1, T2> act, bool lookaheadSafe=false)
+        public void BindExternalFunction<T1, T2>(string funcName, Action<Story, T1, T2> act, bool lookaheadSafe=false)
         {
 			Assert(act != null, "Can't bind a null function");
 
-            BindExternalFunctionGeneral (funcName, (object[] args) => {
+            BindExternalFunctionGeneral (funcName, (Story s , object[] args) => {
                 Assert(args.Length == 2, "External function expected two arguments");
-                act(
+                act(s, 
                     (T1)TryCoerce<T1>(args[0]), 
                     (T2)TryCoerce<T2>(args[1])
                 );
@@ -2269,13 +2269,13 @@ namespace Ink.Runtime
         /// of the function will not change), then you can pass 'true'. 
         /// Usually, you want to pass 'false', especially if you want some action 
         /// to be performed in game code when this function is called.</param>
-        public void BindExternalFunction<T1, T2, T3>(string funcName, Func<T1, T2, T3, object> func, bool lookaheadSafe=false)
+        public void BindExternalFunction<T1, T2, T3>(string funcName, Func<Story, T1, T2, T3, object> func, bool lookaheadSafe=false)
         {
 			Assert(func != null, "Can't bind a null function");
 
-            BindExternalFunctionGeneral (funcName, (object[] args) => {
+            BindExternalFunctionGeneral (funcName, (Story s, object[] args) => {
                 Assert(args.Length == 3, "External function expected three arguments");
-                return func(
+                return func(s ,
                     (T1)TryCoerce<T1>(args[0]), 
                     (T2)TryCoerce<T2>(args[1]),
                     (T3)TryCoerce<T3>(args[2])
@@ -2297,13 +2297,13 @@ namespace Ink.Runtime
         /// of the function will not change), then you can pass 'true'. 
         /// Usually, you want to pass 'false', especially if you want some action 
         /// to be performed in game code when this function is called.</param>
-        public void BindExternalFunction<T1, T2, T3>(string funcName, Action<T1, T2, T3> act, bool lookaheadSafe=false)
+        public void BindExternalFunction<T1, T2, T3>(string funcName, Action<Story, T1, T2, T3> act, bool lookaheadSafe=false)
         {
 			Assert(act != null, "Can't bind a null function");
 
-            BindExternalFunctionGeneral (funcName, (object[] args) => {
+            BindExternalFunctionGeneral (funcName, (Story s , object[] args) => {
                 Assert(args.Length == 3, "External function expected three arguments");
-                act(
+                act(s,
                     (T1)TryCoerce<T1>(args[0]), 
                     (T2)TryCoerce<T2>(args[1]),
                     (T3)TryCoerce<T3>(args[2])
@@ -2326,13 +2326,13 @@ namespace Ink.Runtime
         /// of the function will not change), then you can pass 'true'. 
         /// Usually, you want to pass 'false', especially if you want some action 
         /// to be performed in game code when this function is called.</param>
-        public void BindExternalFunction<T1, T2, T3, T4>(string funcName, Func<T1, T2, T3, T4, object> func, bool lookaheadSafe=false)
+        public void BindExternalFunction<T1, T2, T3, T4>(string funcName, Func<Story, T1, T2, T3, T4, object> func, bool lookaheadSafe=false)
         {
 			Assert(func != null, "Can't bind a null function");
 
-            BindExternalFunctionGeneral (funcName, (object[] args) => {
+            BindExternalFunctionGeneral (funcName, (Story s ,object[] args) => {
                 Assert(args.Length == 4, "External function expected four arguments");
-                return func(
+                return func(s,
                     (T1)TryCoerce<T1>(args[0]), 
                     (T2)TryCoerce<T2>(args[1]),
                     (T3)TryCoerce<T3>(args[2]),
@@ -2355,13 +2355,13 @@ namespace Ink.Runtime
         /// of the function will not change), then you can pass 'true'. 
         /// Usually, you want to pass 'false', especially if you want some action 
         /// to be performed in game code when this function is called.</param>
-        public void BindExternalFunction<T1, T2, T3, T4>(string funcName, Action<T1, T2, T3, T4> act, bool lookaheadSafe=false)
+        public void BindExternalFunction<T1, T2, T3, T4>(string funcName, Action<Story, T1, T2, T3, T4> act, bool lookaheadSafe=false)
         {
 			Assert(act != null, "Can't bind a null function");
 
-            BindExternalFunctionGeneral (funcName, (object[] args) => {
+            BindExternalFunctionGeneral (funcName, (Story s , object[] args) => {
                 Assert(args.Length == 4, "External function expected four arguments");
-                act(
+                act(s, 
                     (T1)TryCoerce<T1>(args[0]), 
                     (T2)TryCoerce<T2>(args[1]),
                     (T3)TryCoerce<T3>(args[2]),
