@@ -20,7 +20,7 @@ namespace Ink
 
             public bool Match(HashSet<string> enabledSymbols)
             {
-                return expression == null || expression.PreprocessorEvaluate(enabledSymbols);
+                return expression == null || enabledSymbols != null && expression.PreprocessorEvaluate(enabledSymbols);
             }
         }
 

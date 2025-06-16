@@ -10,8 +10,8 @@ namespace Ink
             string filenameForMetadata = null, 
             Ink.ErrorHandler externalErrorHandler = null, 
             IFileHandler fileHandler = null, 
-            HashSet<string> preprocessorDirectives = null)
-            : this(str, filenameForMetadata, externalErrorHandler, null, fileHandler, preprocessorDirectives)
+            HashSet<string> enabledSymbols = null)
+            : this(str, filenameForMetadata, externalErrorHandler, null, fileHandler, enabledSymbols)
         {  }
 
         InkParser(string str, 
@@ -19,9 +19,9 @@ namespace Ink
             Ink.ErrorHandler externalErrorHandler = null, 
             InkParser rootParser = null, 
             IFileHandler fileHandler = null, 
-            HashSet<string> preprocessorDirectives = null) : base(str, true) {
+            HashSet<string> enabledSymbols = null) : base(str, true) {
             
-            _preprocessorDirectives = preprocessorDirectives;
+            _enabledSymbols = enabledSymbols ?? rootParser?._enabledSymbols;
             _filename = inkFilename;
             
             PreProcess(str);
@@ -125,7 +125,7 @@ namespace Ink
         {
             //PrintWithLineNumber(str);
             var inputWithCommentsRemoved = (new CommentEliminator (str)).Process();
-            var inputWithPreprocessorResolved = (new InkPreprocessor(inputWithCommentsRemoved, _preprocessorDirectives)).Process();
+            var inputWithPreprocessorResolved = (new InkPreprocessor(inputWithCommentsRemoved, _enabledSymbols)).Process();
             //PrintWithLineNumber(inputWithPreprocessorResolved);
             return inputWithPreprocessorResolved;
         }
@@ -216,7 +216,7 @@ namespace Ink
 
         string _filename;
         
-        HashSet<string> _preprocessorDirectives;
+        HashSet<string> _enabledSymbols;
     }
 }
 
