@@ -122,7 +122,9 @@ namespace Ink
 
         void DirectiveEndOfLine()
         {
-            AnyWhitespace();
+            // Only consume this directive's own end-of-line. AnyWhitespace() would also
+            // swallow following blank lines, which are then missing from CreateResult and
+            // shift later content (and error line numbers) up by one or more lines.
             EndOfLine();
             RecordStart();
         }

@@ -4252,6 +4252,59 @@ VAR {0}z = -> {0}divert
         }
 
         [Test()]
+        public void TestPreprocessorPreservesBlankLinesAfterDirectives()
+        {
+            // Blank lines after #IF / #ENDIF must stay so error line numbers match the source.
+            var source = string.Join("\n", new[] {
+                "#IF DEBUG",
+                "",
+                "Hello",
+                "#ENDIF",
+                "",
+                "World",
+                ""
+            });
+
+            var processed = new InkPreprocessor(source, new HashSet<string> { "DEBUG" }).Process();
+            var lines = processed.Split('\n');
+
+            Assert.AreEqual("", lines[0]);      // #IF replaced
+            Assert.AreEqual("", lines[1]);      // blank after #IF preserved
+            Assert.AreEqual("Hello", lines[2]);
+            Assert.AreEqual("", lines[3]);      // #ENDIF replaced
+            Assert.AreEqual("", lines[4]);      // blank after #ENDIF preserved
+            Assert.AreEqual("World", lines[5]);
+        }
+
+        [Test()]
+        public void TestPreprocessorErrorLineNumbersWithBlankAfterIf()
+        {
+            // Intentional missing divert target on the line after a blank following #IF.
+            // Before the fix, DirectiveEndOfLine ate the blank and reported line 3 instead of 4.
+            var source = string.Join("\n", new[] {
+                "#IF DEBUG",
+                "",
+                "Hello",
+                "-> missing_knot",
+                "#ENDIF",
+                ""
+            });
+
+            var parser = new InkParser(source, null, OnError, null, new HashSet<string> { "DEBUG" });
+            _testingErrors = true;
+            _errorMessages.Clear();
+            _warningMessages.Clear();
+            _authorMessages.Clear();
+
+            var parsedStory = parser.Parse();
+            Assert.IsNotNull(parsedStory);
+            parsedStory.ExportRuntime(OnError);
+
+            Assert.IsTrue(_errorMessages.Exists(m => m.Contains("line 4:")),
+                "Expected error on source line 4, got: " + string.Join(" | ", _errorMessages));
+        }
+
+        [Test()]
         public void TestStructsBasicFieldsAndMethods()
         {
             var story = CompileString(@"
