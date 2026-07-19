@@ -145,8 +145,11 @@ namespace Ink.Parsed
                 var _ = ext.runtimeObject;
             }
 
-            // Null so weave does not emit narrative content; ExportRuntime adds named content
-            return null;
+            // Must return non-null so Parsed.Object caches generation. Returning null caused
+            // GenerateRuntimeObject to run twice (weave + Story.ExportRuntime), which
+            // re-registered EXTERNAL declarations as duplicates.
+            // Weave skips adding this container as narrative content.
+            return runtimeTypeContainer;
         }
 
         public void BuildLinearization (Dictionary<string, StructDeclaration> allStructs)

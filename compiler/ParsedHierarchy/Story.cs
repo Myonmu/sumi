@@ -403,8 +403,11 @@ namespace Ink.Parsed
 
         public void AddExternal(ExternalDeclaration decl)
         {
-            if (externals.ContainsKey (decl.name)) {
-                Error ("Duplicate EXTERNAL definition of '"+decl.name+"'", decl, false);
+            ExternalDeclaration existing;
+            if (externals.TryGetValue (decl.name, out existing)) {
+                // Same declaration re-generated (null-returning runtimeObject is not cached) — ok
+                if (existing != decl)
+                    Error ("Duplicate EXTERNAL definition of '"+decl.name+"'", decl, false);
             } else {
                 externals [decl.name] = decl;
             }

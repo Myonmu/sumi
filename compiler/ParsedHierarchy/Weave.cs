@@ -192,6 +192,12 @@ namespace Ink.Parsed
                         gatherPointsToResolve.AddRange (weave.gatherPointsToResolve);
                     }
 
+                    // Structs live as named content only (Type.static.Method); Story.ExportRuntime
+                    // attaches them. Force generation here but do not emit as narrative.
+                    else if (obj is StructDeclaration) {
+                        var _ = obj.runtimeObject;
+                    }
+
                     // Other object
                     // May be complex object that contains statements - e.g. a multi-line conditional
                     else {

@@ -4361,6 +4361,41 @@ VAR Oswald: Character
             Assert.AreEqual("Flinn", nameVal.value);
         }
 
+        [Test()]
+        public void TestStructsExternalNoDuplicateWithFallback()
+        {
+            // EXTERNAL inside/after a struct used to be registered twice because
+            // StructDeclaration.GenerateRuntimeObject returned null (uncached).
+            var story = CompileString(@"
+-> start
+
+=== struct Character ===
+VAR name = ""anonymous""
+
+EXTERNAL DefineAttribute(varName,displayName,lowerBound,upperBound,evolutive)
+=== function DefineAttribute(varName,displayName,lowerBound,upperBound,evolutive) ===
+~ return true
+
+=== start ===
+{DefineAttribute(""str"", ""Strength"", 1, 10, false)}
+-> END
+");
+            story.allowExternalFunctionFallbacks = true;
+            Assert.AreEqual("true\n", story.ContinueMaximally());
+        }
+
+        [Test()]
+        public void TestStructsExternalTrueDuplicateStillErrors()
+        {
+            CompileString(@"
+=== struct Character ===
+VAR name = ""anonymous""
+EXTERNAL Foo(x)
+EXTERNAL Foo(x)
+", testingErrors: true);
+            Assert.IsTrue(_errorMessages.Exists(m => m.Contains("Duplicate EXTERNAL")));
+        }
+
         private class TestWarningException : System.Exception
         { }
     }
