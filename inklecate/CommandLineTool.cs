@@ -174,7 +174,7 @@ namespace Ink
             var compileSuccess = !(story == null || _errors.Count > 0);
             if( opts.jsonOutput ) {
                 if( compileSuccess )
-                    Console.WriteLine("{\"compile-success\": true}");
+                    EmitCompileSuccessJson (story, compiler);
                 else
                     Console.WriteLine("{\"compile-success\": false}");
             }
@@ -233,6 +233,46 @@ namespace Ink
                     Environment.Exit (ExitCodeError);
                 }
             }
+        }
+
+        /// <summary>
+        /// Emit compile-success plus IDE symbol metadata (structDefs + typedGlobals)
+        /// so tools like Inky can power accurate member autocomplete.
+        /// </summary>
+        void EmitCompileSuccessJson (Runtime.Story story, Compiler compiler)
+        {
+            var writer = new Runtime.SimpleJson.Writer ();
+            writer.WriteObjectStart ();
+            writer.WriteProperty ("compile-success", true);
+
+            // Flattened struct type descriptors (fields + methods after inheritance)
+            if (story != null && story.structDefinitions != null) {
+                writer.WritePropertyStart ("structDefs");
+                writer.WriteObjectStart ();
+                foreach (var def in story.structDefinitions.structs) {
+                    writer.WritePropertyStart (def.name);
+                    Runtime.Json.WriteStructDefinition (writer, def);
+                    writer.WritePropertyEnd ();
+                }
+                writer.WriteObjectEnd ();
+                writer.WritePropertyEnd ();
+            }
+
+            // Global VAR/REFVAR → struct type name
+            writer.WritePropertyStart ("typedGlobals");
+            writer.WriteObjectStart ();
+            if (compiler != null && compiler.parsedStory != null) {
+                foreach (var kv in compiler.parsedStory.variableDeclarations) {
+                    var decl = kv.Value;
+                    if (decl != null && decl.isGlobalDeclaration && decl.structTypeName != null)
+                        writer.WriteProperty (kv.Key, decl.structTypeName);
+                }
+            }
+            writer.WriteObjectEnd ();
+            writer.WritePropertyEnd ();
+
+            writer.WriteObjectEnd ();
+            Console.WriteLine (writer.ToString ());
         }
 
         private void OnExit(object sender, ConsoleCancelEventArgs e)
