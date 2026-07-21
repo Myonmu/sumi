@@ -188,13 +188,8 @@ namespace Ink.Parsed
             foreach (var c in comps)
                 pathNames.Add (c.name);
 
-            // Only treat as a struct method call when the receiver is a struct context
-            if (pathNames [0] != "base") {
-                StructDeclaration recvType;
-                int start;
-                if (!story.TryResolveStructPathContext (pathNames, this, out recvType, out start, reportErrors: false))
-                    return false;
-            }
+            if (!IsStructMethodCallPath (story, pathNames, this))
+                return false;
 
             string methodName = comps [comps.Count - 1].name;
             bool isBase = comps [0].name == "base";
@@ -237,6 +232,35 @@ namespace Ink.Parsed
             return true;
         }
 
+        /// <summary>
+        /// True when recv.Method(...) should use struct virtual call rather than a divert.
+        /// </summary>
+        public static bool IsStructMethodCallPath (Story story, List<string> pathNames, Parsed.Object fromNode)
+        {
+            if (story == null || pathNames == null || pathNames.Count < 2)
+                return false;
+
+            if (pathNames [0] == "base" || pathNames [0] == "self")
+                return true;
+
+            StructDeclaration recvType;
+            int start;
+            if (story.TryResolveStructPathContext (pathNames, fromNode, out recvType, out start, reportErrors: false))
+                return true;
+
+            // Don't steal knot.stitch() calls
+            if (story.ContentWithNameAtLevel (pathNames [0], FlowLevel.Knot) != null)
+                return false;
+
+            // Variable may be registered; treat dotted calls on variables as struct methods
+            // when the story defines structs (ResolveReferences validates the member).
+            if (story.structs != null && story.structs.Count > 0
+                && story.ResolveVariableWithName (pathNames [0], fromNode).found)
+                return true;
+
+            return false;
+        }
+
         Stitch ClosestStructMethod ()
         {
             var ancestor = parent;
@@ -257,14 +281,7 @@ namespace Ink.Parsed
                 foreach (var c in comps)
                     pathNames.Add (c.name);
 
-                bool isStructCall = pathNames [0] == "base";
-                if (!isStructCall) {
-                    StructDeclaration recvType;
-                    int start;
-                    isStructCall = context.TryResolveStructPathContext (pathNames, this, out recvType, out start, reportErrors: false);
-                }
-
-                if (isStructCall) {
+                if (IsStructMethodCallPath (context, pathNames, this)) {
                     if (arguments != null) {
                         foreach (var arg in arguments)
                             arg.ResolveReferences (context);

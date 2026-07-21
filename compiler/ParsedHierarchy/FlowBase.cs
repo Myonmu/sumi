@@ -144,8 +144,10 @@ namespace Ink.Parsed
         public void TryAddNewVariableDeclaration(VariableAssignment varDecl)
         {
             var varName = varDecl.variableName;
+            // Don't double-register if ExportRuntime already added globals early
             if (variableDeclarations.ContainsKey (varName)) {
-
+                if (variableDeclarations [varName] == varDecl)
+                    return;
                 var prevDeclError = "";
                 var debugMetadata = variableDeclarations [varName].debugMetadata;
                 if (debugMetadata != null) {

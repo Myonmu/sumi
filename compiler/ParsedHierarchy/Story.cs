@@ -156,6 +156,13 @@ namespace Ink.Parsed
             foreach (var kv in structs)
                 kv.Value.BuildLinearization (structs);
 
+            // Register global VAR/REFVAR declarations before codegen so struct method
+            // calls can resolve receivers (Oswald.Foo, party.scout.Bar, …).
+            foreach (var varDecl in FindAll<VariableAssignment> ()) {
+                if (varDecl.isGlobalDeclaration && !varDecl.isStructField)
+                    TryAddNewVariableDeclaration (varDecl);
+            }
+
             // Resolution of weave point names has to come first, before any runtime code generation
             // since names have to be ready before diverts start getting created.
             // (It used to be done in the constructor for a weave, but didn't allow us to generate
@@ -667,12 +674,12 @@ namespace Ink.Parsed
                 return true;
             }
 
-            var varDecl = ResolveVariableDeclaration (root, fromNode);
-            if (varDecl != null && varDecl.structTypeName != null) {
-                type = ResolveStruct (varDecl.structTypeName);
+            var typeName = ResolveStructTypeNameForName (root, fromNode);
+            if (typeName != null) {
+                type = ResolveStruct (typeName);
                 if (type == null) {
                     if (reportErrors)
-                        fromNode.Error ("Unknown struct type '" + varDecl.structTypeName + "' for '" + root + "'", fromNode);
+                        fromNode.Error ("Unknown struct type '" + typeName + "' for '" + root + "'", fromNode);
                     return false;
                 }
                 memberStartIndex = 1;
@@ -690,6 +697,9 @@ namespace Ink.Parsed
                 if (path != null && path.Count >= 2 && path [0] != "base") {
                     var varDecl = ResolveVariableDeclaration (path [0], fromNode);
                     if (varDecl != null && varDecl.structTypeName == null)
+                        fromNode.Error ("Cannot access '" + path [1] + "' on '" + path [0] + "' because it is not a struct-typed variable", fromNode);
+                    else if (ResolveStructTypeNameForName (path [0], fromNode) == null
+                             && ResolveVariableWithName (path [0], fromNode).found)
                         fromNode.Error ("Cannot access '" + path [1] + "' on '" + path [0] + "' because it is not a struct-typed variable", fromNode);
                 }
                 return;
@@ -736,8 +746,10 @@ namespace Ink.Parsed
 
             StructDeclaration type;
             int start;
-            if (!TryResolveStructPathContext (pathIncludingMethod, fromNode, out type, out start))
+            if (!TryResolveStructPathContext (pathIncludingMethod, fromNode, out type, out start)) {
+                fromNode.Error ("Cannot resolve struct type for '" + pathIncludingMethod [0] + "' in method call", fromNode);
                 return;
+            }
 
             // Intermediate fields before the method name
             int methodIndex = pathIncludingMethod.Count - 1;
