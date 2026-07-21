@@ -22,7 +22,9 @@ namespace Ink.Runtime
 
         // Not used for coersion described above
         DivertTarget,
-        VariablePointer
+        VariablePointer,
+        Struct,
+        StructRef
     }
 
     public abstract class Value : Runtime.Object
@@ -58,6 +60,8 @@ namespace Ink.Runtime
                 return new DivertTargetValue ((Path)val);
             } else if (val is InkList) {
                 return new ListValue ((InkList)val);
+            } else if (val is StructObject) {
+                return new StructValue ((StructObject)val);
             }
 
             return null;
@@ -323,6 +327,39 @@ namespace Ink.Runtime
         public override Object Copy()
         {
             return new VariablePointerValue (variableName, contextIndex);
+        }
+    }
+
+    public class StructValue : Value<StructObject>
+    {
+        public override ValueType valueType { get { return ValueType.Struct; } }
+        public override bool isTruthy { get { return value != null; } }
+
+        public StructValue (StructObject obj) : base (obj)
+        {
+        }
+
+        public StructValue () : this (null)
+        {
+        }
+
+        public override Value Cast (ValueType newType)
+        {
+            if (newType == valueType)
+                return this;
+            throw BadCastException (newType);
+        }
+
+        public override Object Copy ()
+        {
+            if (value == null)
+                return new StructValue (null);
+            return new StructValue (value.DeepCopy ());
+        }
+
+        public override string ToString ()
+        {
+            return value == null ? "null" : ("struct(" + value.typeName + ")");
         }
     }
 
