@@ -8,7 +8,7 @@ namespace Ink.Parsed
         // - Normal variables have a single item in their "path"
         // - Knot/stitch names for read counts are actual dot-separated paths
         // - List names are dot separated: listName.itemName (or just itemName)
-        // - Struct fields: instance.field or Type.static.field
+        // - Struct fields: instance.field or Type.static.field (self.field inside methods)
         public string name { get; private set; }
 
         public Identifier identifier {
@@ -66,17 +66,7 @@ namespace Ink.Parsed
                 return;
             }
 
-            // Bare field name inside a struct method → self.field
-            if (path.Count == 1 && IsSelfField (path [0])) {
-                isStructFieldReference = true;
-                container.AddContent (new Runtime.VariablePointerValue ("self"));
-                // Need value not pointer for get — resolve pointer when getting field
-                // StructFieldGet follows VariablePointerValue
-                container.AddContent (new Runtime.StructFieldGet (path [0]));
-                return;
-            }
-
-            // Struct field path: root.field[.field...]
+            // Struct field path: root.field[.field...] (including self.field)
             if (path.Count >= 2 && IsStructFieldPath ()) {
                 isStructFieldReference = true;
                 // Use pointer for root so field sets through refs work; for get, ResolveStructInstance handles pointers
@@ -114,28 +104,6 @@ namespace Ink.Parsed
             container.AddContent (_runtimeVarRef);
         }
 
-        bool IsSelfField (string fieldName)
-        {
-            var method = ClosestStructMethod ();
-            if (method == null)
-                return false;
-            var structDecl = method.parent as StructDeclaration;
-            if (structDecl == null)
-                return false;
-            // Prefer flattened if available; else own fields
-            if (structDecl.flattenedFields != null) {
-                foreach (var field in structDecl.flattenedFields) {
-                    if (field.name == fieldName)
-                        return true;
-                }
-            }
-            foreach (var field in structDecl.ownFields) {
-                if (field.variableName == fieldName)
-                    return true;
-            }
-            return false;
-        }
-
         bool IsStructFieldPath ()
         {
             if (path.Count < 2)
@@ -170,20 +138,9 @@ namespace Ink.Parsed
             base.ResolveReferences (context);
 
             if (isConstantReference || isListItemReference || isStructReference || isStructFieldReference) {
-                // Resolve self.field inside methods
                 if (isStructFieldReference)
                     ValidateStructFieldPath (context);
                 return;
-            }
-
-            // Inside struct method: bare field name → self.field
-            if (path.Count == 1) {
-                var selfField = TryResolveAsSelfField (context);
-                if (selfField) {
-                    // Rewrite codegen already happened — patch by regenerating is hard.
-                    // Instead, handle in GenerateIntoContainer by checking at gen time.
-                    return;
-                }
             }
 
             // Is it a read count?

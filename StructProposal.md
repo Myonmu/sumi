@@ -593,7 +593,7 @@ Struct method calls reuse ink’s existing function-call machinery (evaluation s
 
 - `self` is a reserved name inside method bodies and must not appear in the author parameter list.
 - Assigning to `self` itself (`~ self = other`) is a compile error; mutate fields (`~ self.name = "..."`) instead.
-- Unqualified names that match a field of the receiver’s static type resolve to `self.field` (so `{name}` equals `{self.name}` inside methods). Parameters and locals shadow fields.
+- **Python-style qualification:** bare names always resolve in the normal ink outer scope (globals, temps, parameters, knots/functions). Struct fields and methods are only reached through an explicit receiver — `self.field`, `self.Method(...)`, or another instance path. There is no unqualified `name` → `self.name` or `Foo()` → `self.Foo()` sugar.
 
 ### Receiver (`self`): always by reference
 
@@ -721,6 +721,7 @@ leave: pop callstack; return value on eval stack (or void)
 ## Compiler checks (summary)
 
 - `struct`, `REFVAR`, and in-method `self` / `base` are reserved as specified.
+- Struct method names may collide with top-level `=== function` / knot names; `Foo()` is the global, `self.Foo()` is the method.
 - No member named `static`.
 - Inheritance acyclic; bases must exist.
 - Typed struct variables require a known struct type.
@@ -843,7 +844,7 @@ Save / load rules:
 VAR name = "anonymous"
 VAR nerves = 1
 = function ReactShocked() =
-{name} looks startled.
+{self.name} looks startled.
 ~ return
 = function ReactFurious() =
 The heck you are doing?

@@ -378,7 +378,8 @@ namespace Ink
 
             List<Identifier> path = Interleave<Identifier> (IdentifierWithMetadata, Exclude (Spaced (String ("."))));
 
-            if (path == null || Story.IsReservedKeyword (path[0].name) )
+            // Allow 'self' as a receiver (Python-style); other reserved keywords stay invalid as names.
+            if (path == null || (Story.IsReservedKeyword (path[0].name) && path[0].name != "self"))
                 return null;
 
             return new VariableReference (path);

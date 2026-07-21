@@ -562,8 +562,14 @@ namespace Ink.Parsed
             // Top level knots
             FlowBase knotOrFunction = ContentWithNameAtLevel (identifier?.name, FlowLevel.Knot) as FlowBase;
             if (knotOrFunction && (knotOrFunction != obj || symbolType == SymbolType.Arg)) {
-                NameConflictError (obj, identifier?.name, knotOrFunction, typeNameToPrint);
-                return;
+                // Struct methods may share names with top-level functions: bare Foo() is
+                // the global, self.Foo() is the method (Python-style qualification).
+                var asFlow = obj as FlowBase;
+                bool isStructMethod = asFlow != null && asFlow.parent is StructDeclaration;
+                if (!isStructMethod) {
+                    NameConflictError (obj, identifier?.name, knotOrFunction, typeNameToPrint);
+                    return;
+                }
             }
 
             // Structs — allow VAR Instance: StructType when names match (default proposal pattern)
