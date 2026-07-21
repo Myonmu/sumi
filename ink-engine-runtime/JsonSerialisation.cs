@@ -152,6 +152,21 @@ namespace Ink.Runtime
                 return;
             }
 
+            var structVal = obj as StructValue;
+            if (structVal) {
+                WriteStructValue (writer, structVal);
+                return;
+            }
+
+            var structRefVal = obj as StructRefValue;
+            if (structRefVal) {
+                writer.WriteObjectStart ();
+                // Encode none as empty object marker property with empty string
+                writer.WriteProperty ("^r", structRefVal.targetName ?? "");
+                writer.WriteObjectEnd ();
+                return;
+            }
+
             var divTargetVal = obj as DivertTargetValue;
             if (divTargetVal)
             {
@@ -232,6 +247,41 @@ namespace Ink.Runtime
 
                 writer.WriteObjectEnd();
 
+                return;
+            }
+
+            var structFieldGet = obj as StructFieldGet;
+            if (structFieldGet) {
+                writer.WriteObjectStart ();
+                writer.WriteProperty ("sget", structFieldGet.fieldName);
+                writer.WriteObjectEnd ();
+                return;
+            }
+
+            var structFieldSet = obj as StructFieldSet;
+            if (structFieldSet) {
+                writer.WriteObjectStart ();
+                writer.WriteProperty ("sset", structFieldSet.fieldName);
+                writer.WriteObjectEnd ();
+                return;
+            }
+
+            var structCreate = obj as StructCreateDefault;
+            if (structCreate) {
+                writer.WriteObjectStart ();
+                writer.WriteProperty ("snew", structCreate.typeName);
+                writer.WriteObjectEnd ();
+                return;
+            }
+
+            var structMethodCall = obj as StructMethodCall;
+            if (structMethodCall) {
+                writer.WriteObjectStart ();
+                writer.WriteProperty (structMethodCall.isBaseCall ? "sbase" : "scall", structMethodCall.methodName);
+                writer.WriteProperty ("argc", structMethodCall.argumentCount);
+                if (structMethodCall.targetPathString != null)
+                    writer.WriteProperty ("path", structMethodCall.targetPathString);
+                writer.WriteObjectEnd ();
                 return;
             }
 
@@ -389,6 +439,34 @@ namespace Ink.Runtime
                     if (obj.TryGetValue ("ci", out propValue))
                         varPtr.contextIndex = (int)propValue;
                     return varPtr;
+                }
+
+                // Struct instance value
+                if (obj.TryGetValue ("^t", out propValue)) {
+                    return JTokenToStructValue (obj);
+                }
+
+                // Struct ref
+                if (obj.TryGetValue ("^r", out propValue)) {
+                    var target = propValue as string;
+                    if (string.IsNullOrEmpty (target))
+                        return new StructRefValue (null);
+                    return new StructRefValue (target);
+                }
+
+                // Struct field get/set / create / method call
+                if (obj.TryGetValue ("sget", out propValue))
+                    return new StructFieldGet ((string)propValue);
+                if (obj.TryGetValue ("sset", out propValue))
+                    return new StructFieldSet ((string)propValue);
+                if (obj.TryGetValue ("snew", out propValue))
+                    return new StructCreateDefault ((string)propValue);
+                if (obj.TryGetValue ("scall", out propValue) || obj.TryGetValue ("sbase", out propValue)) {
+                    bool isBase = obj.ContainsKey ("sbase");
+                    string methodName = (string)(isBase ? obj ["sbase"] : obj ["scall"]);
+                    int argc = obj.TryGetValue ("argc", out propValue) ? (int)propValue : 0;
+                    string path = obj.TryGetValue ("path", out propValue) ? (string)propValue : null;
+                    return new StructMethodCall (methodName, argc, isBase, path);
                 }
 
                 // Divert
@@ -705,6 +783,134 @@ namespace Ink.Runtime
             }
 
             return new ListDefinitionsOrigin (allDefs);
+        }
+
+        public static void WriteStructValue (SimpleJson.Writer writer, StructValue structVal)
+        {
+            writer.WriteObjectStart ();
+            writer.WriteProperty ("^t", structVal.value.typeName);
+            foreach (var kv in structVal.value.storage) {
+                writer.WritePropertyStart (kv.Key);
+                WriteRuntimeObject (writer, kv.Value);
+                writer.WritePropertyEnd ();
+            }
+            writer.WriteObjectEnd ();
+        }
+
+        public static StructValue JTokenToStructValue (Dictionary<string, object> obj)
+        {
+            string typeName = (string)obj ["^t"];
+            var storage = new Dictionary<string, Runtime.Object> ();
+            foreach (var kv in obj) {
+                if (kv.Key == "^t")
+                    continue;
+                storage [kv.Key] = JTokenToRuntimeObject (kv.Value);
+            }
+            return new StructValue (new StructObject (typeName, storage));
+        }
+
+        public static void WriteStructDefinition (SimpleJson.Writer writer, StructDeclaration def)
+        {
+            writer.WriteObjectStart ();
+
+            writer.WritePropertyStart ("bases");
+            writer.WriteArrayStart ();
+            foreach (var b in def.bases)
+                writer.Write (b);
+            writer.WriteArrayEnd ();
+            writer.WritePropertyEnd ();
+
+            writer.WritePropertyStart ("fields");
+            writer.WriteArrayStart ();
+            foreach (var field in def.fields) {
+                writer.WriteObjectStart ();
+                writer.WriteProperty ("name", field.name);
+                writer.WriteProperty ("kind", field.kind == StructFieldKind.RefVar ? "refvar" : "var");
+                if (field.typeName != null)
+                    writer.WriteProperty ("type", field.typeName);
+                if (field.defaultValue != null) {
+                    // Skip null StructRefValue defaults — absence means none
+                    var refDef = field.defaultValue as StructRefValue;
+                    if (!(refDef != null && refDef.targetName == null)) {
+                        writer.WritePropertyStart ("default");
+                        WriteRuntimeObject (writer, field.defaultValue);
+                        writer.WritePropertyEnd ();
+                    }
+                }
+                writer.WriteObjectEnd ();
+            }
+            writer.WriteArrayEnd ();
+            writer.WritePropertyEnd ();
+
+            writer.WritePropertyStart ("methods");
+            writer.WriteObjectStart ();
+            foreach (var kv in def.methods)
+                writer.WriteProperty (kv.Key, kv.Value);
+            writer.WriteObjectEnd ();
+            writer.WritePropertyEnd ();
+
+            if (def.baseCalls != null && def.baseCalls.Count > 0) {
+                writer.WritePropertyStart ("baseCalls");
+                writer.WriteObjectStart ();
+                foreach (var kv in def.baseCalls)
+                    writer.WriteProperty (kv.Key, kv.Value);
+                writer.WriteObjectEnd ();
+                writer.WritePropertyEnd ();
+            }
+
+            writer.WriteObjectEnd ();
+        }
+
+        public static StructDefinitionsOrigin JTokenToStructDefinitions (object obj)
+        {
+            var defsObj = (Dictionary<string, object>)obj;
+            var allDefs = new List<StructDeclaration> ();
+
+            foreach (var kv in defsObj) {
+                var name = kv.Key;
+                var defJson = (Dictionary<string, object>)kv.Value;
+
+                var bases = new List<string> ();
+                object basesObj;
+                if (defJson.TryGetValue ("bases", out basesObj)) {
+                    foreach (var b in (List<object>)basesObj)
+                        bases.Add ((string)b);
+                }
+
+                var fields = new List<StructFieldSlot> ();
+                object fieldsObj;
+                if (defJson.TryGetValue ("fields", out fieldsObj)) {
+                    foreach (var fieldTok in (List<object>)fieldsObj) {
+                        var fieldJson = (Dictionary<string, object>)fieldTok;
+                        string fieldName = (string)fieldJson ["name"];
+                        string kindStr = fieldJson.ContainsKey ("kind") ? (string)fieldJson ["kind"] : "var";
+                        var kind = kindStr == "refvar" ? StructFieldKind.RefVar : StructFieldKind.Var;
+                        string typeName = fieldJson.ContainsKey ("type") ? (string)fieldJson ["type"] : null;
+                        Runtime.Object defaultVal = null;
+                        if (fieldJson.ContainsKey ("default"))
+                            defaultVal = JTokenToRuntimeObject (fieldJson ["default"]);
+                        fields.Add (new StructFieldSlot (fieldName, kind, typeName, defaultVal));
+                    }
+                }
+
+                var methods = new Dictionary<string, string> ();
+                object methodsObj;
+                if (defJson.TryGetValue ("methods", out methodsObj)) {
+                    foreach (var m in (Dictionary<string, object>)methodsObj)
+                        methods [m.Key] = (string)m.Value;
+                }
+
+                var baseCalls = new Dictionary<string, string> ();
+                object baseCallsObj;
+                if (defJson.TryGetValue ("baseCalls", out baseCallsObj)) {
+                    foreach (var m in (Dictionary<string, object>)baseCallsObj)
+                        baseCalls [m.Key] = (string)m.Value;
+                }
+
+                allDefs.Add (new StructDeclaration (name, bases, fields, methods, baseCalls));
+            }
+
+            return new StructDefinitionsOrigin (allDefs);
         }
 
         static Json() 
