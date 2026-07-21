@@ -71,14 +71,23 @@ namespace Ink.Runtime
         /// types will be implicitly casted when setting.
         /// For example, doubles to floats, longs to ints, and bools
         /// to ints.
+        /// <para>
+        /// Dotted paths address struct fields on globals, e.g.
+        /// <c>variablesState["Oswald.name"]</c> or nested
+        /// <c>variablesState["party.scout.name"]</c> (REFVAR segments
+        /// are followed automatically).
+        /// </para>
         /// </summary>
         public object this[string variableName]
         {
             get {
+                if (variableName != null && variableName.IndexOf ('.') >= 0)
+                    return GetValueByDottedPath (variableName);
+
                 Runtime.Object varContents;
 
                 if (patch != null && patch.TryGetGlobal(variableName, out varContents))
-                    return (varContents as Runtime.Value).valueObject;
+                    return ValueObjectFollowingRefs (varContents);
 
                 // Search main dictionary first.
                 // If it's not found, it might be because the story content has changed,
@@ -86,14 +95,34 @@ namespace Ink.Runtime
                 // Should really warn somehow, but it's difficult to see how...!
                 if ( _globalVariables.TryGetValue (variableName, out varContents) || 
                      _defaultGlobalVariables.TryGetValue(variableName, out varContents) )
-                    return (varContents as Runtime.Value).valueObject;
+                    return ValueObjectFollowingRefs (varContents);
                 else {
                     return null;
                 }
             }
             set {
+                if (variableName != null && variableName.IndexOf ('.') >= 0) {
+                    SetValueByDottedPath (variableName, value);
+                    return;
+                }
+
                 if (!_defaultGlobalVariables.ContainsKey (variableName))
                     throw new StoryException ("Cannot assign to a variable ("+variableName+") that hasn't been declared in the story");
+
+                var existing = GetRawGlobalForPath (variableName);
+                if (existing is StructRefValue) {
+                    Runtime.Object stored;
+                    if (value is StructRefValue)
+                        stored = ((StructRefValue)value).Copy ();
+                    else if (value == null)
+                        stored = new StructRefValue (null);
+                    else if (value is string)
+                        stored = new StructRefValue ((string)value);
+                    else
+                        throw new StoryException ("REFVAR '" + variableName + "' must be set to a global name string, StructRefValue, or null");
+                    SetGlobal (variableName, stored);
+                    return;
+                }
                 
                 var val = Runtime.Value.Create(value);
                 if (val == null) {
@@ -106,6 +135,217 @@ namespace Ink.Runtime
 
                 SetGlobal (variableName, val);
             }
+        }
+
+        object ValueObjectFollowingRefs (Runtime.Object varContents)
+        {
+            var refVal = varContents as StructRefValue;
+            if (refVal != null) {
+                if (string.IsNullOrEmpty (refVal.targetName))
+                    return null;
+                var target = GetRawGlobalForPath (refVal.targetName);
+                // Nested REFVAR globals
+                while (target is StructRefValue nested) {
+                    if (string.IsNullOrEmpty (nested.targetName))
+                        return null;
+                    target = GetRawGlobalForPath (nested.targetName);
+                }
+                var asValue = target as Value;
+                return asValue != null ? asValue.valueObject : null;
+            }
+            var val = varContents as Runtime.Value;
+            return val != null ? val.valueObject : null;
+        }
+
+        /// <summary>
+        /// Get a global or a struct field via a dotted path (e.g. "Oswald.name").
+        /// Returns null if the path cannot be resolved.
+        /// </summary>
+        public object GetValueByDottedPath (string path)
+        {
+            Runtime.Object runtimeVal;
+            if (!TryGetRuntimeValueByDottedPath (path, out runtimeVal))
+                return null;
+            var asValue = runtimeVal as Value;
+            return asValue != null ? asValue.valueObject : null;
+        }
+
+        /// <summary>
+        /// Set a global struct field via a dotted path (e.g. "Oswald.name" = "Flinn").
+        /// REFVAR fields accept a global name string, <see cref="StructRefValue"/>, or null for none.
+        /// </summary>
+        public void SetValueByDottedPath (string path, object value)
+        {
+            if (string.IsNullOrEmpty (path))
+                throw new StoryException ("Cannot set empty variable path");
+
+            var parts = path.Split ('.');
+            if (parts.Length < 2)
+                throw new StoryException ("Dotted path '" + path + "' must include at least one field (e.g. Oswald.name)");
+
+            for (int p = 0; p < parts.Length; p++) {
+                if (string.IsNullOrEmpty (parts [p]))
+                    throw new StoryException ("Invalid dotted path '" + path + "'");
+            }
+
+            var rootName = parts [0];
+            var current = ResolveStructRootForPath (rootName, path);
+            if (current == null || current.value == null)
+                throw new StoryException ("Cannot set '" + path + "': '" + rootName + "' is not a struct global");
+
+            // Walk to the parent struct of the final field
+            for (int i = 1; i < parts.Length - 1; i++) {
+                current = ResolveStructChild (current, parts [i], path);
+            }
+
+            var fieldName = parts [parts.Length - 1];
+            var existing = current.value.GetField (fieldName);
+
+            Runtime.Object stored;
+            if (existing is StructRefValue) {
+                // Rebind REFVAR: string = global name, null = none
+                if (value is StructRefValue)
+                    stored = ((StructRefValue)value).Copy ();
+                else if (value == null)
+                    stored = new StructRefValue (null);
+                else if (value is string)
+                    stored = new StructRefValue ((string)value);
+                else
+                    throw new StoryException ("REFVAR field '" + path + "' must be set to a global name string, StructRefValue, or null");
+            }
+            else {
+                if (value is StructObject)
+                    stored = new StructValue ((StructObject)value).Copy ();
+                else if (value is StructValue)
+                    stored = ((StructValue)value).Copy ();
+                else {
+                    stored = Value.Create (value);
+                    if (stored == null)
+                        throw new Exception ("Invalid value passed to VariableState path '" + path + "': " + (value == null ? "null" : value.ToString ()));
+                }
+            }
+
+            current.value.SetField (fieldName, stored);
+
+            // Notify observers interested in the root global
+            if (variableChangedEvent != null) {
+                var rootVal = GetRawGlobalForPath (rootName);
+                if (rootVal != null)
+                    variableChangedEvent (rootName, rootVal);
+            }
+        }
+
+        StructValue ResolveStructRootForPath (string rootName, string fullPath)
+        {
+            var runtimeVal = GetRawGlobalForPath (rootName);
+            while (runtimeVal is StructRefValue refVal) {
+                if (string.IsNullOrEmpty (refVal.targetName))
+                    throw new StoryException ("Cannot set '" + fullPath + "': REFVAR '" + rootName + "' is none");
+                runtimeVal = GetRawGlobalForPath (refVal.targetName);
+            }
+            return runtimeVal as StructValue;
+        }
+
+        bool TryGetRuntimeValueByDottedPath (string path, out Runtime.Object runtimeVal)
+        {
+            runtimeVal = null;
+            if (string.IsNullOrEmpty (path))
+                return false;
+
+            var parts = path.Split ('.');
+            if (parts.Length == 0)
+                return false;
+
+            for (int p = 0; p < parts.Length; p++) {
+                if (string.IsNullOrEmpty (parts [p]))
+                    return false;
+            }
+
+            runtimeVal = GetRawGlobalForPath (parts [0]);
+            if (runtimeVal == null)
+                return false;
+
+            // Follow REFVAR at the root (global REFVAR variables)
+            while (runtimeVal is StructRefValue rootRef) {
+                if (string.IsNullOrEmpty (rootRef.targetName)) {
+                    runtimeVal = null;
+                    return parts.Length == 1; // none is a valid terminal get → null value
+                }
+                runtimeVal = GetRawGlobalForPath (rootRef.targetName);
+                if (runtimeVal == null)
+                    return false;
+            }
+
+            for (int i = 1; i < parts.Length; i++) {
+                var structVal = runtimeVal as StructValue;
+                if (structVal == null || structVal.value == null) {
+                    runtimeVal = null;
+                    return false;
+                }
+
+                var field = structVal.value.GetField (parts [i]);
+                if (field == null) {
+                    runtimeVal = null;
+                    return false;
+                }
+
+                var refVal = field as StructRefValue;
+                if (refVal != null) {
+                    if (string.IsNullOrEmpty (refVal.targetName)) {
+                        runtimeVal = null;
+                        return i == parts.Length - 1; // none is a valid terminal get → null value
+                    }
+                    runtimeVal = GetRawGlobalForPath (refVal.targetName);
+                    if (runtimeVal == null)
+                        return false;
+                    // Nested REFVAR globals as targets
+                    while (runtimeVal is StructRefValue nestedRef) {
+                        if (string.IsNullOrEmpty (nestedRef.targetName)) {
+                            runtimeVal = null;
+                            return i == parts.Length - 1;
+                        }
+                        runtimeVal = GetRawGlobalForPath (nestedRef.targetName);
+                        if (runtimeVal == null)
+                            return false;
+                    }
+                    continue;
+                }
+
+                runtimeVal = field;
+            }
+
+            return true;
+        }
+
+        Runtime.Object GetRawGlobalForPath (string name)
+        {
+            Runtime.Object varContents = null;
+            if (patch != null && patch.TryGetGlobal (name, out varContents))
+                return varContents;
+            if (_globalVariables.TryGetValue (name, out varContents))
+                return varContents;
+            if (_defaultGlobalVariables != null && _defaultGlobalVariables.TryGetValue (name, out varContents))
+                return varContents;
+            return null;
+        }
+
+        StructValue ResolveStructChild (StructValue parent, string fieldName, string fullPath)
+        {
+            var field = parent.value.GetField (fieldName);
+            var refVal = field as StructRefValue;
+            if (refVal != null) {
+                if (string.IsNullOrEmpty (refVal.targetName))
+                    throw new StoryException ("Cannot set '" + fullPath + "': REFVAR '" + fieldName + "' is none");
+                var target = GetRawGlobalForPath (refVal.targetName) as StructValue;
+                if (target == null || target.value == null)
+                    throw new StoryException ("Cannot set '" + fullPath + "': REFVAR '" + fieldName + "' target '" + refVal.targetName + "' is not a struct");
+                return target;
+            }
+
+            var nested = field as StructValue;
+            if (nested == null || nested.value == null)
+                throw new StoryException ("Cannot set '" + fullPath + "': '" + fieldName + "' is not a struct field");
+            return nested;
         }
 
 		System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator()
@@ -252,6 +492,12 @@ namespace Ink.Runtime
                 varValue = ValueAtVariablePointer (varPointer);
             }
 
+            // Follow global REFVAR to the target instance (none stays as StructRefValue)
+            var refVal = varValue as StructRefValue;
+            if (refVal != null && !string.IsNullOrEmpty (refVal.targetName)) {
+                varValue = GetVariableWithName (refVal.targetName, 0);
+            }
+
             return varValue;
         }
 
@@ -335,6 +581,17 @@ namespace Ink.Runtime
             var structVal = value as StructValue;
             if (structVal != null)
                 value = structVal.Copy ();
+
+            // Rebinding a REFVAR global: keep StructRefValue; coerce pointer → ref
+            if (setGlobal) {
+                var existingRaw = GetRawGlobalForPath (name);
+                if (existingRaw is StructRefValue) {
+                    if (value is VariablePointerValue)
+                        value = new StructRefValue (((VariablePointerValue)value).variableName);
+                    else if (value is StructValue)
+                        throw new StoryException ("Cannot assign a struct value to REFVAR '" + name + "'; assign a global name (or none)");
+                }
+            }
 
             if (setGlobal) {
                 SetGlobal (name, value);
