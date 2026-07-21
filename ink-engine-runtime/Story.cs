@@ -1867,9 +1867,12 @@ namespace Ink.Runtime
 
         StructObject ResolveStructInstance (Runtime.Object obj)
         {
-            var ptr = obj as VariablePointerValue;
-            if (ptr != null)
+            // Chase ref-parameter pointer chains: who → someone → StructValue
+            var seen = 0;
+            while (obj is VariablePointerValue && seen++ < 8) {
+                var ptr = (VariablePointerValue)obj;
                 obj = state.variablesState.ValueAtVariablePointer (ptr);
+            }
 
             var structVal = obj as StructValue;
             if (structVal != null)
@@ -1888,17 +1891,15 @@ namespace Ink.Runtime
 
         void SetStructField (Runtime.Object instanceObj, string fieldName, Runtime.Object valueToSet)
         {
-            // If instanceObj is a pointer, mutate the pointed-to struct in place
-            var ptr = instanceObj as VariablePointerValue;
-            StructValue structVal = null;
-            string mutateGlobalName = null;
-
-            if (ptr != null) {
-                mutateGlobalName = ptr.variableName;
-                structVal = state.variablesState.ValueAtVariablePointer (ptr) as StructValue;
-            } else {
-                structVal = instanceObj as StructValue;
+            // If instanceObj is a pointer (possibly a chain through a ref parameter), 
+            // mutate the pointed-to struct in place
+            var seen = 0;
+            while (instanceObj is VariablePointerValue && seen++ < 8) {
+                var ptr = (VariablePointerValue)instanceObj;
+                instanceObj = state.variablesState.ValueAtVariablePointer (ptr);
             }
+
+            var structVal = instanceObj as StructValue;
 
             if (structVal == null || structVal.value == null) {
                 Error ("Cannot set field '" + fieldName + "' on non-struct value");
