@@ -473,6 +473,24 @@ namespace Ink.Parsed
 
         void GenerateStructVariableInit (VariableAssignment varDecl, Runtime.Container container)
         {
+            // Global REFVAR: store a reference identity, not an owned instance
+            if (varDecl.isRefVar) {
+                var varRef = varDecl.expression as VariableReference;
+                if (varRef != null && varRef.name == "none") {
+                    container.AddContent (new Runtime.StructRefValue (null));
+                } else if (varDecl.expression is NoneLiteral) {
+                    container.AddContent (new Runtime.StructRefValue (null));
+                } else if (varRef != null && varRef.path != null && varRef.path.Count == 1) {
+                    container.AddContent (new Runtime.StructRefValue (varRef.name));
+                } else if (varDecl.expression == null) {
+                    container.AddContent (new Runtime.StructRefValue (null));
+                } else {
+                    Error ("REFVAR '" + varDecl.variableName + "' must be initialised to a global instance name or none", varDecl, false);
+                    container.AddContent (new Runtime.StructRefValue (null));
+                }
+                return;
+            }
+
             if (varDecl.expression != null) {
                 varDecl.expression.GenerateIntoContainer (container);
                 // Deep-copy on assign handled by VariablesState for StructValue

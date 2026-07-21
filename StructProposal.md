@@ -548,7 +548,7 @@ Rules:
 - Reading members through a `REFVAR` that is `none` is a runtime error.
 - Assigning to a `REFVAR` (`~ party.scout = Flinn`) rebinds the reference; it does not copy fields.
 - Assigning through a `REFVAR` (`~ party.scout.name = "x"`) mutates the target instance.
-- `REFVAR` is only for **fields**. Ordinary variables use `VAR` / `temp` plus optional `ref` on parameters; there is no `REFVAR` at global/temp declaration sites.
+- `REFVAR` may be declared as a **struct field** or as a **top-level global** (`REFVAR active: Character = none`). Temps still use `VAR` / `temp` plus optional `ref` on parameters.
 
 ### Mixing with ink `ref`
 
@@ -556,7 +556,7 @@ Rules:
 |-----------|------|
 | `ref` parameter | Existing ink: pass variable storage by reference for the call |
 | Struct-typed `VAR` / `temp` | Owns an instance value (deep copy on assign) |
-| `REFVAR` field | Stored alias inside a struct instance |
+| `REFVAR` field or global | Stored alias of another global instance |
 
 ---
 

@@ -4432,8 +4432,8 @@ VAR name = ""Flinn Oswald""
 
 === struct Party ===
 VAR leader: Character = Character
-REFVAR scout: Character = none
-
+REFVAR scout: Oswald = none
+===
 VAR Oswald: Oswald
 VAR party: Party = Party
 
@@ -4448,12 +4448,49 @@ VAR party: Party = Party
         }
 
         [Test()]
-        public void TestStructsSaveLoadRoundTrip()
+        public void TestStructsIsAndIsntPolymorphism()
         {
             var story = CompileString(@"
 === struct Character ===
 VAR name = ""anonymous""
 
+=== struct ISuspect ===
+= function IsSuspect() =
+~ return true
+
+=== struct Oswald: Character, ISuspect ===
+VAR name = ""Flinn Oswald""
+
+=== struct Party ===
+REFVAR scout: Character = none
+===
+VAR Oswald: Oswald
+VAR other: Character
+VAR party: Party
+
+-> start
+=== start ===
+~ party.scout = Oswald
+{Oswald is Oswald}
+{Oswald is Character}
+{Oswald is ISuspect}
+{Oswald isnt Character}
+{other is Oswald}
+{other is Character}
+{party.scout is Oswald}
+{party.scout isnt ISuspect}
+-> END
+");
+            Assert.AreEqual("true\ntrue\ntrue\nfalse\nfalse\ntrue\ntrue\nfalse\n", story.ContinueMaximally());
+        }
+
+        [Test()]
+        public void TestStructsSaveLoadRoundTrip()
+        {
+            var story = CompileString(@"
+=== struct Character ===
+VAR name = ""anonymous""
+===
 VAR Oswald: Character
 
 -> start

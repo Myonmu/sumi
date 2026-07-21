@@ -72,6 +72,21 @@ namespace Ink.Parsed
 
             var container = new Runtime.Container ();
 
+            // Reassignment to a global REFVAR: store reference identity, not a deep copy
+            VariableAssignment existingDecl;
+            if (!isNewTemporaryDeclaration
+                && story != null
+                && story.variableDeclarations.TryGetValue (variableName, out existingDecl)
+                && existingDecl != null
+                && existingDecl.isRefVar) {
+                container.AddContent (Runtime.ControlCommand.EvalStart ());
+                GenerateRefVarRhs (container);
+                container.AddContent (Runtime.ControlCommand.EvalEnd ());
+                _runtimeAssignment = new Runtime.VariableAssignment (variableName, false);
+                container.AddContent (_runtimeAssignment);
+                return container;
+            }
+
             // Typed temp without initializer → default instance
             if (expression == null && structTypeName != null) {
                 container.AddContent (new Runtime.StructCreateDefault (structTypeName));
@@ -88,6 +103,20 @@ namespace Ink.Parsed
             return container;
         }
 
+        void GenerateRefVarRhs (Runtime.Container container)
+        {
+            var rhsVar = expression as VariableReference;
+            if (rhsVar != null && rhsVar.path != null && rhsVar.path.Count == 1 && rhsVar.name != "none") {
+                container.AddContent (new Runtime.StructRefValue (rhsVar.name));
+            } else if (expression is NoneLiteral || (rhsVar != null && rhsVar.name == "none")) {
+                container.AddContent (new Runtime.StructRefValue (null));
+            } else if (expression != null) {
+                expression.GenerateIntoContainer (container);
+            } else {
+                container.AddContent (new Runtime.StructRefValue (null));
+            }
+        }
+
         public override void ResolveReferences (Story context)
         {
             base.ResolveReferences (context);
@@ -102,6 +131,9 @@ namespace Ink.Parsed
 
             // Initial VAR x = [intialValue] declaration, not re-assignment
             if (this.isGlobalDeclaration) {
+                if (isRefVar && structTypeName == null)
+                    Error ("REFVAR '" + variableName + "' requires a struct type, e.g. REFVAR " + variableName + ": TypeName = none");
+
                 var variableReference = expression as VariableReference;
                 if (variableReference && !variableReference.isConstantReference && !variableReference.isListItemReference && !variableReference.isStructReference) {
                     // Struct-typed init may refer to type default or another instance
@@ -131,7 +163,7 @@ namespace Ink.Parsed
         public override string typeName {
             get {
                 if (isNewTemporaryDeclaration) return "temp";
-                else if (isGlobalDeclaration) return "VAR";
+                else if (isGlobalDeclaration) return isRefVar ? "REFVAR" : "VAR";
                 else if (isStructField) return isRefVar ? "REFVAR" : "VAR";
                 else return "variable assignment";
             }
