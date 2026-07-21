@@ -331,6 +331,10 @@ namespace Ink.Runtime
                 } while(existingPointer);
             }
 
+            // Struct values are deep-copied on assignment (value semantics)
+            var structVal = value as StructValue;
+            if (structVal != null)
+                value = structVal.Copy ();
 
             if (setGlobal) {
                 SetGlobal (name, value);

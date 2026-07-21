@@ -130,6 +130,12 @@ namespace Ink.Runtime
             }
         }
 
+        public StructDefinitionsOrigin structDefinitions {
+            get {
+                return _structDefinitions;
+            }
+        }
+
         /// <summary>
         /// The entire current state of the story including (but not limited to):
         /// 
@@ -194,12 +200,15 @@ namespace Ink.Runtime
         // Warning: When creating a Story using this constructor, you need to
         // call ResetState on it before use. Intended for compiler use only.
         // For normal use, use the constructor that takes a json string.
-        public Story (Container contentContainer, List<Runtime.ListDefinition> lists = null)
+        public Story (Container contentContainer, List<Runtime.ListDefinition> lists = null, List<Runtime.StructDeclaration> structs = null)
 		{
 			_mainContentContainer = contentContainer;
 
             if (lists != null)
                 _listDefinitions = new ListDefinitionsOrigin (lists);
+
+            if (structs != null)
+                _structDefinitions = new StructDefinitionsOrigin (structs);
 
             _externals = new Dictionary<string, ExternalFunctionDef> ();
 		}
@@ -231,6 +240,11 @@ namespace Ink.Runtime
             object listDefsObj;
             if (rootObject.TryGetValue ("listDefs", out listDefsObj)) {
                 _listDefinitions = Json.JTokenToListDefinitions (listDefsObj);
+            }
+
+            object structDefsObj;
+            if (rootObject.TryGetValue ("structDefs", out structDefsObj)) {
+                _structDefinitions = Json.JTokenToStructDefinitions (structDefsObj);
             }
 
             _mainContentContainer = Json.JTokenToRuntimeObject (rootToken) as Container;
@@ -291,6 +305,19 @@ namespace Ink.Runtime
 
                 writer.WriteObjectEnd();
                 writer.WritePropertyEnd();
+            }
+
+            // Struct definitions
+            if (_structDefinitions != null) {
+                writer.WritePropertyStart ("structDefs");
+                writer.WriteObjectStart ();
+                foreach (var def in _structDefinitions.structs) {
+                    writer.WritePropertyStart (def.name);
+                    Json.WriteStructDefinition (writer, def);
+                    writer.WritePropertyEnd ();
+                }
+                writer.WriteObjectEnd ();
+                writer.WritePropertyEnd ();
             }
 
             writer.WriteObjectEnd();
@@ -1700,6 +1727,55 @@ namespace Ink.Runtime
                 return true;
             }
 
+            // Struct field get: pop instance, push field
+            else if (contentObj is StructFieldGet) {
+                var fieldGet = (StructFieldGet)contentObj;
+                var instanceObj = state.PopEvaluationStack ();
+                var structObj = ResolveStructInstance (instanceObj);
+                if (structObj == null) {
+                    Error ("Cannot get field '" + fieldGet.fieldName + "' on non-struct value");
+                    state.PushEvaluationStack (new IntValue (0));
+                    return true;
+                }
+                var fieldVal = structObj.GetField (fieldGet.fieldName);
+                // Follow REFVAR
+                var refVal = fieldVal as StructRefValue;
+                if (refVal != null) {
+                    if (string.IsNullOrEmpty (refVal.targetName)) {
+                        Error ("REFVAR '" + fieldGet.fieldName + "' is none");
+                        state.PushEvaluationStack (new IntValue (0));
+                        return true;
+                    }
+                    fieldVal = state.variablesState.GetVariableWithName (refVal.targetName);
+                }
+                state.PushEvaluationStack (fieldVal ?? new IntValue (0));
+                return true;
+            }
+
+            // Struct field set: stack is [instance, value] (value on top)
+            else if (contentObj is StructFieldSet) {
+                var fieldSet = (StructFieldSet)contentObj;
+                var valueToSet = state.PopEvaluationStack ();
+                var instanceObj = state.PopEvaluationStack ();
+                SetStructField (instanceObj, fieldSet.fieldName, valueToSet);
+                return true;
+            }
+
+            // Create default struct instance
+            else if (contentObj is StructCreateDefault) {
+                var create = (StructCreateDefault)contentObj;
+                var instance = CreateDefaultStructInstance (create.typeName);
+                state.PushEvaluationStack (new StructValue (instance));
+                return true;
+            }
+
+            // Virtual / base method call
+            else if (contentObj is StructMethodCall) {
+                var call = (StructMethodCall)contentObj;
+                PerformStructMethodCall (call);
+                return true;
+            }
+
             // Native function call
             else if (contentObj is NativeFunctionCall) {
                 var func = (NativeFunctionCall)contentObj;
@@ -1711,6 +1787,143 @@ namespace Ink.Runtime
 
             // No control content, must be ordinary content
             return false;
+        }
+
+        StructObject ResolveStructInstance (Runtime.Object obj)
+        {
+            var ptr = obj as VariablePointerValue;
+            if (ptr != null)
+                obj = state.variablesState.ValueAtVariablePointer (ptr);
+
+            var structVal = obj as StructValue;
+            if (structVal != null)
+                return structVal.value;
+
+            var refVal = obj as StructRefValue;
+            if (refVal != null) {
+                if (string.IsNullOrEmpty (refVal.targetName))
+                    return null;
+                var target = state.variablesState.GetVariableWithName (refVal.targetName) as StructValue;
+                return target?.value;
+            }
+
+            return null;
+        }
+
+        void SetStructField (Runtime.Object instanceObj, string fieldName, Runtime.Object valueToSet)
+        {
+            // If instanceObj is a pointer, mutate the pointed-to struct in place
+            var ptr = instanceObj as VariablePointerValue;
+            StructValue structVal = null;
+            string mutateGlobalName = null;
+
+            if (ptr != null) {
+                mutateGlobalName = ptr.variableName;
+                structVal = state.variablesState.ValueAtVariablePointer (ptr) as StructValue;
+            } else {
+                structVal = instanceObj as StructValue;
+            }
+
+            if (structVal == null || structVal.value == null) {
+                Error ("Cannot set field '" + fieldName + "' on non-struct value");
+                return;
+            }
+
+            StructDeclaration typeDesc = null;
+            if (_structDefinitions != null)
+                typeDesc = _structDefinitions.GetDefinition (structVal.value.typeName);
+
+            StructFieldSlot slot = null;
+            if (typeDesc != null)
+                typeDesc.TryGetField (fieldName, out slot);
+
+            Runtime.Object stored;
+            if (slot != null && slot.kind == StructFieldKind.RefVar) {
+                if (valueToSet is StructRefValue)
+                    stored = valueToSet;
+                else if (valueToSet is VariablePointerValue)
+                    stored = new StructRefValue (((VariablePointerValue)valueToSet).variableName);
+                else if (valueToSet is StructValue)
+                    stored = valueToSet; // shouldn't happen for refvar; keep as-is for recovery
+                else
+                    stored = new StructRefValue (null);
+            } else if (valueToSet is StructValue) {
+                stored = ((StructValue)valueToSet).Copy ();
+            } else {
+                stored = valueToSet?.Copy () ?? valueToSet;
+            }
+
+            structVal.value.SetField (fieldName, stored);
+            // In-place mutation of the StructObject is enough; no re-Assign needed.
+        }
+
+        StructObject CreateDefaultStructInstance (string typeName, HashSet<string> creating = null)
+        {
+            if (_structDefinitions == null)
+                throw new System.Exception ("No struct definitions");
+
+            var typeDesc = _structDefinitions.GetDefinition (typeName);
+            if (typeDesc == null)
+                throw new System.Exception ("Unknown struct type: " + typeName);
+
+            if (creating == null)
+                creating = new HashSet<string> ();
+            if (!creating.Add (typeName))
+                throw new System.Exception ("Recursive struct field defaults involving '" + typeName + "'");
+
+            var storage = new Dictionary<string, Runtime.Object> ();
+            foreach (var field in typeDesc.fields) {
+                if (field.kind == StructFieldKind.RefVar) {
+                    storage [field.name] = StructObject.DeepCopyValue (field.defaultValue) ?? new StructRefValue (null);
+                } else if (field.typeName != null) {
+                    if (field.defaultValue is StructValue)
+                        storage [field.name] = StructObject.DeepCopyValue (field.defaultValue);
+                    else
+                        storage [field.name] = new StructValue (CreateDefaultStructInstance (field.typeName, creating));
+                } else if (field.defaultValue != null) {
+                    storage [field.name] = StructObject.DeepCopyValue (field.defaultValue);
+                } else {
+                    storage [field.name] = new IntValue (0);
+                }
+            }
+            creating.Remove (typeName);
+            return new StructObject (typeName, storage);
+        }
+
+        void PerformStructMethodCall (StructMethodCall call)
+        {
+            // Stack: receiverPtr, arg0, ... argN (argN on top)
+            var args = new List<Runtime.Object> ();
+            for (int i = 0; i < call.argumentCount; i++)
+                args.Insert (0, state.PopEvaluationStack ());
+
+            var receiver = state.PopEvaluationStack ();
+
+            string pathStr = call.targetPathString;
+            if (!call.isBaseCall) {
+                var instance = ResolveStructInstance (receiver);
+                if (instance == null) {
+                    Error ("Cannot call method '" + call.methodName + "' on non-struct / none");
+                    return;
+                }
+                StructDeclaration typeDesc = _structDefinitions?.GetDefinition (instance.typeName);
+                if (typeDesc == null || !typeDesc.TryGetMethodPath (call.methodName, out pathStr)) {
+                    Error ("Method '" + call.methodName + "' not found on struct '" + instance.typeName + "'");
+                    return;
+                }
+            }
+
+            // Push receiver then args for function entry (L→R on stack bottom→top)
+            state.PushEvaluationStack (receiver);
+            foreach (var a in args)
+                state.PushEvaluationStack (a);
+
+            var path = new Path (pathStr);
+            state.divertedPointer = PointerAtPath (path);
+            state.callStack.Push (PushPopType.Function, outputStreamLengthWithPushed: state.outputStream.Count);
+
+            if (state.divertedPointer.isNull)
+                Error ("Struct method path not found: " + pathStr);
         }
 
         /// <summary>
@@ -1832,6 +2045,67 @@ namespace Ink.Runtime
         {
             string _;
             return EvaluateFunction (functionName, out _, arguments);
+        }
+
+        /// <summary>
+        /// Virtually call a struct method. <paramref name="instance"/> may be a global
+        /// variable name (string) or a <see cref="StructValue"/>.
+        /// </summary>
+        public object EvaluateMethod (object instance, string methodName, params object [] arguments)
+        {
+            string textOutput;
+            return EvaluateMethod (instance, methodName, out textOutput, arguments);
+        }
+
+        public object EvaluateMethod (object instance, string methodName, out string textOutput, params object [] arguments)
+        {
+            IfAsyncWeCant ("evaluate a method");
+
+            VariablePointerValue receiverPtr = null;
+            StructObject structObj = null;
+
+            if (instance is string globalName) {
+                receiverPtr = new VariablePointerValue (globalName, 0);
+                structObj = (variablesState.GetVariableWithName (globalName) as StructValue)?.value;
+            } else if (instance is StructValue sv) {
+                structObj = sv.value;
+            } else if (instance is StructObject so) {
+                structObj = so;
+            }
+
+            if (structObj == null)
+                throw new System.Exception ("EvaluateMethod requires a struct instance");
+
+            string pathStr;
+            var typeDesc = _structDefinitions?.GetDefinition (structObj.typeName);
+            if (typeDesc == null || !typeDesc.TryGetMethodPath (methodName, out pathStr))
+                throw new System.Exception ("Method '" + methodName + "' not found on '" + structObj.typeName + "'");
+
+            var funcContainer = ContentAtPath (new Path (pathStr)).container;
+            if (funcContainer == null)
+                throw new System.Exception ("Method path not found: " + pathStr);
+
+            var outputStreamBefore = new List<Runtime.Object> (state.outputStream);
+            _state.ResetOutput ();
+
+            state.callStack.Push (PushPopType.FunctionEvaluationFromGame, state.evaluationStack.Count);
+            state.callStack.currentElement.currentPointer = Pointer.StartOf (funcContainer);
+
+            if (receiverPtr != null)
+                state.PushEvaluationStack (receiverPtr);
+            else
+                state.PushEvaluationStack (new StructValue (structObj));
+
+            state.PassArgumentsToEvaluationStack (arguments);
+
+            var stringOutput = new StringBuilder ();
+            while (canContinue) {
+                stringOutput.Append (Continue ());
+            }
+            textOutput = stringOutput.ToString ();
+
+            _state.ResetOutput (outputStreamBefore);
+            return state.CompleteFunctionEvaluationFromGame ();
         }
 
         /// <summary>
@@ -2100,6 +2374,102 @@ namespace Ink.Runtime
 
         // Convenience overloads for standard functions and actions of various arities
         // Is there a better way of doing this?!
+
+        // Classic overloads (no Story parameter) — preferred for game bindings and tests
+        public void BindExternalFunction(string funcName, Func<object> func, bool lookaheadSafe = false)
+        {
+            Assert(func != null, "Can't bind a null function");
+            BindExternalFunctionGeneral(funcName, (Story s, object[] args) => {
+                Assert(args.Length == 0, "External function expected no arguments");
+                return func();
+            }, lookaheadSafe);
+        }
+
+        public void BindExternalFunction(string funcName, Action act, bool lookaheadSafe = false)
+        {
+            Assert(act != null, "Can't bind a null function");
+            BindExternalFunctionGeneral(funcName, (Story s, object[] args) => {
+                Assert(args.Length == 0, "External function expected no arguments");
+                act();
+                return null;
+            }, lookaheadSafe);
+        }
+
+        public void BindExternalFunction<T>(string funcName, Func<T, object> func, bool lookaheadSafe = false)
+        {
+            Assert(func != null, "Can't bind a null function");
+            BindExternalFunctionGeneral(funcName, (Story s, object[] args) => {
+                Assert(args.Length == 1, "External function expected one argument");
+                return func((T)TryCoerce<T>(args[0]));
+            }, lookaheadSafe);
+        }
+
+        public void BindExternalFunction<T>(string funcName, Action<T> act, bool lookaheadSafe = false)
+        {
+            Assert(act != null, "Can't bind a null function");
+            BindExternalFunctionGeneral(funcName, (Story s, object[] args) => {
+                Assert(args.Length == 1, "External function expected one argument");
+                act((T)TryCoerce<T>(args[0]));
+                return null;
+            }, lookaheadSafe);
+        }
+
+        public void BindExternalFunction<T1, T2>(string funcName, Func<T1, T2, object> func, bool lookaheadSafe = false)
+        {
+            Assert(func != null, "Can't bind a null function");
+            BindExternalFunctionGeneral(funcName, (Story s, object[] args) => {
+                Assert(args.Length == 2, "External function expected two arguments");
+                return func((T1)TryCoerce<T1>(args[0]), (T2)TryCoerce<T2>(args[1]));
+            }, lookaheadSafe);
+        }
+
+        public void BindExternalFunction<T1, T2>(string funcName, Action<T1, T2> act, bool lookaheadSafe = false)
+        {
+            Assert(act != null, "Can't bind a null function");
+            BindExternalFunctionGeneral(funcName, (Story s, object[] args) => {
+                Assert(args.Length == 2, "External function expected two arguments");
+                act((T1)TryCoerce<T1>(args[0]), (T2)TryCoerce<T2>(args[1]));
+                return null;
+            }, lookaheadSafe);
+        }
+
+        public void BindExternalFunction<T1, T2, T3>(string funcName, Func<T1, T2, T3, object> func, bool lookaheadSafe = false)
+        {
+            Assert(func != null, "Can't bind a null function");
+            BindExternalFunctionGeneral(funcName, (Story s, object[] args) => {
+                Assert(args.Length == 3, "External function expected three arguments");
+                return func((T1)TryCoerce<T1>(args[0]), (T2)TryCoerce<T2>(args[1]), (T3)TryCoerce<T3>(args[2]));
+            }, lookaheadSafe);
+        }
+
+        public void BindExternalFunction<T1, T2, T3>(string funcName, Action<T1, T2, T3> act, bool lookaheadSafe = false)
+        {
+            Assert(act != null, "Can't bind a null function");
+            BindExternalFunctionGeneral(funcName, (Story s, object[] args) => {
+                Assert(args.Length == 3, "External function expected three arguments");
+                act((T1)TryCoerce<T1>(args[0]), (T2)TryCoerce<T2>(args[1]), (T3)TryCoerce<T3>(args[2]));
+                return null;
+            }, lookaheadSafe);
+        }
+
+        public void BindExternalFunction<T1, T2, T3, T4>(string funcName, Func<T1, T2, T3, T4, object> func, bool lookaheadSafe = false)
+        {
+            Assert(func != null, "Can't bind a null function");
+            BindExternalFunctionGeneral(funcName, (Story s, object[] args) => {
+                Assert(args.Length == 4, "External function expected four arguments");
+                return func((T1)TryCoerce<T1>(args[0]), (T2)TryCoerce<T2>(args[1]), (T3)TryCoerce<T3>(args[2]), (T4)TryCoerce<T4>(args[3]));
+            }, lookaheadSafe);
+        }
+
+        public void BindExternalFunction<T1, T2, T3, T4>(string funcName, Action<T1, T2, T3, T4> act, bool lookaheadSafe = false)
+        {
+            Assert(act != null, "Can't bind a null function");
+            BindExternalFunctionGeneral(funcName, (Story s, object[] args) => {
+                Assert(args.Length == 4, "External function expected four arguments");
+                act((T1)TryCoerce<T1>(args[0]), (T2)TryCoerce<T2>(args[1]), (T3)TryCoerce<T3>(args[2]), (T4)TryCoerce<T4>(args[3]));
+                return null;
+            }, lookaheadSafe);
+        }
 
         /// <summary>
         /// Bind a C# function to an ink EXTERNAL function declaration.
@@ -2934,6 +3304,7 @@ namespace Ink.Runtime
 
         Container _mainContentContainer;
         ListDefinitionsOrigin _listDefinitions;
+        StructDefinitionsOrigin _structDefinitions;
 
         struct ExternalFunctionDef {
             public ExternalFunction function;
