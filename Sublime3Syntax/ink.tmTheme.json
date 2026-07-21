@@ -1,0 +1,146 @@
+{
+  "author": "Joseph Humfrey, inkle",
+  "name": "ink light theme",
+  "comment": "https://github.com/inkle/ink",
+  "semanticClass": "theme.light.ink",
+  "colorSpaceName": "sRGB",
+  "settings": [
+    {
+      "settings": {
+        "background": "#ffffff",
+        "caret": "#4a4543",
+        "foreground": "#4a4543",
+        "invisibles": "#d6d5d4",
+        "lineHighlight": "#d6d5d4",
+        "selection": "#d6d5d4"
+      }
+    },
+    {
+      "name": "Knot and stitch declarations",
+      "scope": [
+        "meta.knot.declaration",
+        "meta.stitch.declaration"
+      ],
+      "settings": {
+        "fontStyle": "bold",
+        "foreground": "#11D"
+      }
+    },
+    {
+      "name": "Weave punctuation - choices, gather bullets and brackets",
+      "scope": [
+        "keyword.operator.weaveBullet",
+        "keyword.operator.weaveBracket"
+      ],
+      "settings": {
+        "foreground": "#cc0000"
+      }
+    },
+    {
+      "name": "Label for choice or gather",
+      "scope": [
+        "meta.label",
+        "entity.name.label"
+      ],
+      "settings": {
+        "foreground": "#11D"
+      }
+    },
+    {
+      "name": "Divert",
+      "scope": [
+        "meta.divert",
+        "keyword.operator.divert",
+        "variable.divertTarget"
+      ],
+      "settings": {
+        "foreground": "#11D"
+      }
+    },
+    {
+      "name": "General logic",
+      "scope": [
+        "meta.logic",
+        "keyword.operator",
+        "meta.multilineLogic",
+        "meta.logicBegin",
+        "entity.inlineConditional"
+      ],
+      "settings": {
+        "foreground": "#228b22"
+      }
+    },
+    {
+      "name": "Global",
+      "scope": "meta.variable",
+      "settings": {
+        "foreground": "#44D"
+      }
+    },
+    {
+      "name": "TODO",
+      "scope": "comment.todo",
+      "settings": {
+        "foreground": "#F00"
+      }
+    },
+    {
+      "name": "TODO",
+      "scope": "comment.todo.TODO",
+      "settings": {
+        "background": "#FDD"
+      }
+    },
+    {
+      "name": "Comments",
+      "scope": [
+        "comment",
+        "punctuation.definition.comment"
+      ],
+      "settings": {
+        "foreground": "#888"
+      }
+    },
+    {
+      "name": "Operators",
+      "scope": [
+        "keyword.done",
+        "keyword.end"
+      ],
+      "settings": {
+        "foreground": "#00F"
+      }
+    },
+    {
+      "name": "Bold-italic text",
+      "scope": "string.boldItalic",
+      "settings": {
+        "fontStyle": "bold, italic",
+        "foreground": "#000"
+      }
+    },
+    {
+      "name": "Bold text",
+      "scope": "string.bold",
+      "settings": {
+        "fontStyle": "bold",
+        "foreground": "#000"
+      }
+    },
+    {
+      "name": "Italic text",
+      "scope": "string.italic",
+      "settings": {
+        "fontStyle": "italic"
+      }
+    },
+    {
+      "name": "Main content",
+      "scope": "string",
+      "settings": {
+        "foreground": "#000"
+      }
+    }
+  ],
+  "uuid": "14875ac8-6a02-493d-9cfa-1701c764e24b"
+}
