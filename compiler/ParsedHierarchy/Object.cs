@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Text;
 
 namespace Ink.Parsed
@@ -256,8 +256,17 @@ namespace Ink.Parsed
                         return nestedResult;
                 }
             }
+            else
+            {
+                foreach (var obj in content)
+                {
+                    var child = obj as T;
+                    if (child != null && (queryFunc == null || queryFunc(child) == true))
+                        return child;
+                }
+            }
             return null;
-    }
+        }
 
 
         public List<T> FindAll<T>(FindQueryFunc<T> queryFunc = null) where T : class

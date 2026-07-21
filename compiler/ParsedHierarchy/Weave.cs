@@ -493,9 +493,12 @@ namespace Ink.Parsed
             var varAss = obj as VariableAssignment;
             if (varAss && varAss.isGlobalDeclaration && varAss.isDeclaration)
                 return true;
-            
+
             var constDecl = obj as ConstantDeclaration;
             if (constDecl)
+                return true;
+
+            if (obj is StructDeclaration)
                 return true;
 
             return false;

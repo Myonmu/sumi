@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 
 namespace Ink.Parsed
 {
@@ -156,6 +156,11 @@ namespace Ink.Parsed
                 }
             }
 
+            // Struct method call: recv.Method(...) or base.Method(...)
+            else if (TryGenerateStructMethodCall (container)) {
+                usingProxyDivert = false;
+            }
+
             // Normal function call
             else {
                 container.AddContent (_proxyDivert.runtimeObject);
@@ -173,8 +178,89 @@ namespace Ink.Parsed
                 container.AddContent (Runtime.ControlCommand.PopEvaluatedValue ());
         }
 
+        bool TryGenerateStructMethodCall (Runtime.Container container)
+        {
+            var comps = _proxyDivert.target?.components;
+            if (comps == null || comps.Count < 2)
+                return false;
+
+            string methodName = comps [comps.Count - 1].name;
+            bool isBase = comps [0].name == "base";
+
+            // Push receiver as pointer
+            if (isBase) {
+                container.AddContent (new Runtime.VariablePointerValue ("self"));
+            } else {
+                // Receiver path without method name
+                string root = comps [0].name;
+                if (root == "self") {
+                    container.AddContent (new Runtime.VariablePointerValue ("self"));
+                } else {
+                    container.AddContent (new Runtime.VariablePointerValue (root));
+                }
+                // Intermediate fields: Oswald not nested; party.scout.Method
+                for (int i = 1; i < comps.Count - 1; i++) {
+                    if (comps [i].name == "static")
+                        continue;
+                    container.AddContent (new Runtime.StructFieldGet (comps [i].name));
+                    // After get we have a value; for method call need pointer to that instance.
+                    // If it's a REFVAR target StructValue, ResolveStructInstance works on StructValue.
+                }
+            }
+
+            // Explicit arguments (self is implicit)
+            if (arguments != null) {
+                foreach (var arg in arguments)
+                    arg.GenerateIntoContainer (container);
+            }
+
+            int argc = arguments != null ? arguments.Count : 0;
+            string basePath = null;
+            if (isBase) {
+                var method = ClosestStructMethod ();
+                var structDecl = method?.parent as StructDeclaration;
+                if (structDecl != null && structDecl.baseCallPaths != null)
+                    structDecl.baseCallPaths.TryGetValue (methodName, out basePath);
+            }
+
+            container.AddContent (new Runtime.StructMethodCall (methodName, argc, isBase, basePath));
+            return true;
+        }
+
+        Stitch ClosestStructMethod ()
+        {
+            var ancestor = parent;
+            while (ancestor != null) {
+                var stitch = ancestor as Stitch;
+                if (stitch != null && stitch.isFunction && ancestor.parent is StructDeclaration)
+                    return stitch;
+                ancestor = ancestor.parent;
+            }
+            return null;
+        }
+
         public override void ResolveReferences (Story context)
         {
+            // Struct method calls shouldn't use proxy divert resolution
+            var comps = _proxyDivert.target?.components;
+            if (comps != null && comps.Count >= 2) {
+                // Resolve arguments only
+                if (arguments != null) {
+                    foreach (var arg in arguments)
+                        arg.ResolveReferences (context);
+                }
+
+                if (comps [0].name == "base") {
+                    var method = ClosestStructMethod ();
+                    var structDecl = method?.parent as StructDeclaration;
+                    string methodName = comps [comps.Count - 1].name;
+                    if (structDecl == null || structDecl.baseCallPaths == null || !structDecl.baseCallPaths.ContainsKey (methodName)) {
+                        Error ("base." + methodName + "() is only valid inside an overriding method");
+                    }
+                }
+                return;
+            }
+
             base.ResolveReferences (context);
 
             // If we aren't using the proxy divert after all (e.g. if

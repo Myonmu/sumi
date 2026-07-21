@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 
 namespace Ink.Parsed
 {
@@ -17,7 +17,7 @@ namespace Ink.Parsed
             get { return identifier?.name; }
         }
         public Identifier identifier { get; set; }
-        public List<Argument> arguments { get; protected set; }
+        public List<Argument> arguments { get; set; }
         public bool hasParameters { get { return arguments != null && arguments.Count > 0; } }
         public Dictionary<string, VariableAssignment> variableDeclarations;
 
@@ -180,7 +180,7 @@ namespace Ink.Parsed
 
             // Non-functon: Make sure knots and stitches don't attempt to use Return statement
             else if( flowLevel == FlowLevel.Knot || flowLevel == FlowLevel.Stitch ) {
-                foundReturn = Find<Return> (nested:false);
+                foundReturn = _rootWeave != null ? _rootWeave.Find<Return> () : null;
                 if (foundReturn != null) {
                     Error ("Return statements can only be used in knots that are declared as functions: == function " + this.identifier + " ==", foundReturn);
                 }
@@ -386,13 +386,13 @@ namespace Ink.Parsed
                 Error ("Functions may not contain stitches, but saw '"+name+"' within the function '"+this.identifier+"'", subFlow);
             }
 
-            var allDiverts = _rootWeave.FindAll<Divert> ();
+            var allDiverts = _rootWeave != null ? _rootWeave.FindAll<Divert> () : new List<Divert>();
             foreach (var divert in allDiverts) {
                 if( !divert.isFunctionCall && !(divert.parent is DivertTarget) )
                     Error ("Functions may not contain diverts, but saw '"+divert.ToString()+"'", divert);
             }
 
-            var allChoices = _rootWeave.FindAll<Choice> ();
+            var allChoices = _rootWeave != null ? _rootWeave.FindAll<Choice> () : new List<Choice>();
             foreach (var choice in allChoices) {
                 Error ("Functions may not contain choices, but saw '"+choice.ToString()+"'", choice);
             }
