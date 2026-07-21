@@ -4655,6 +4655,64 @@ EXTERNAL DefineAttribute(varName,displayName,lowerBound,upperBound,evolutive)
         }
 
         [Test()]
+        public void TestStructsTypedFunctionParameters()
+        {
+            var story = CompileString(@"
+-> start
+
+=== struct Character ===
+VAR name = ""anonymous""
+===
+VAR someone: Character
+VAR other: Character
+
+=== function Announce(who: Character) ===
+{who.name} is announced.
+~ who.name = ""mutated-copy""
+~ return
+
+=== function Rename(ref who: Character, newName) ===
+~ who.name = newName
+~ return
+
+=== start ===
+~ someone.name = ""Announcer""
+~ Announce(someone)
+{someone.name}
+~ Rename(someone, ""Renamed"")
+{someone.name}
+-> END
+");
+            Assert.AreEqual("Announcer is announced.\nAnnouncer\nRenamed\n", story.ContinueMaximally());
+        }
+
+        [Test()]
+        public void TestStructsTypedParameterIncompatibleTypeErrors()
+        {
+            CompileString(@"
+-> start
+
+=== struct Character ===
+VAR name = ""anonymous""
+===
+=== struct Note ===
+VAR content = ""x""
+===
+VAR someone: Character
+VAR note: Note
+
+=== function Announce(who: Character) ===
+~ return
+
+=== start ===
+~ Announce(note)
+-> END
+", testingErrors: true);
+            Assert.IsTrue(_errorMessages.Exists(m => m.Contains("expects struct type 'Character'") && m.Contains("Note")),
+                "Expected incompatible struct param error, got: " + string.Join(" | ", _errorMessages));
+        }
+
+        [Test()]
         public void TestStructsUnknownFieldAndMethodErrors()
         {
             CompileString(@"

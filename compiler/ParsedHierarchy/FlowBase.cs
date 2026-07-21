@@ -10,6 +10,8 @@ namespace Ink.Parsed
             public Identifier identifier;
             public bool isByReference;
             public bool isDivertTarget;
+            /// <summary>Optional struct type annotation, e.g. who: Character.</summary>
+            public string structTypeName;
         }
 
         public string name
@@ -349,8 +351,15 @@ namespace Ink.Parsed
             // Check validity of parameter names
             if (arguments != null) {
 
-                foreach (var arg in arguments)
+                foreach (var arg in arguments) {
                     context.CheckForNamingCollisions (this, arg.identifier, Story.SymbolType.Arg, "argument");
+                    if (arg.structTypeName != null) {
+                        if (arg.isDivertTarget)
+                            Error ("Divert target parameter '" + arg.identifier + "' cannot have a struct type", this);
+                        else if (context.ResolveStruct (arg.structTypeName) == null)
+                            Error ("Unknown struct type '" + arg.structTypeName + "' for parameter '" + arg.identifier + "'", this);
+                    }
+                }
 
                 // Separately, check for duplicate arugment names, since they aren't Parsed.Objects,
                 // so have to be checked independently.

@@ -222,6 +222,25 @@ namespace Ink.Parsed
                 } else if (targetFlow.isFunction && !this.isFunctionCall && !(this.parent is DivertTarget)) {
                     base.Error (targetFlow.identifier + " can't be diverted to. It can only be called as a function since it's been marked as such: '" + targetFlow.identifier + "(...)'");
                 }
+
+                // Struct-typed parameters: check simple variable / type-name arguments
+                if (isFunctionCall && arguments != null && targetFlow.arguments != null) {
+                    int n = System.Math.Min (arguments.Count, targetFlow.arguments.Count);
+                    for (int i = 0; i < n; ++i) {
+                        var flowArg = targetFlow.arguments [i];
+                        if (flowArg.structTypeName == null)
+                            continue;
+                        var varRef = arguments [i] as VariableReference;
+                        if (varRef == null || varRef.path == null || varRef.path.Count != 1)
+                            continue;
+                        string actualType = context.ResolveStructTypeNameForName (varRef.path [0], this);
+                        if (actualType == null && context.ResolveStruct (varRef.path [0]) != null)
+                            actualType = varRef.path [0];
+                        if (actualType != null && !context.StructTypeIsCompatible (actualType, flowArg.structTypeName)) {
+                            Error ("Parameter '" + flowArg.identifier + "' expects struct type '" + flowArg.structTypeName + "' but got '" + actualType + "'", arguments [i]);
+                        }
+                    }
+                }
             }
 
             // Check validity of target content

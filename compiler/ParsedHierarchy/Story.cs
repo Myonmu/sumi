@@ -528,6 +528,85 @@ namespace Ink.Parsed
             return null;
         }
 
+        /// <summary>
+        /// Struct type of a variable, temp, or typed function parameter in scope.
+        /// </summary>
+        public string ResolveStructTypeNameForName (string varName, Parsed.Object fromNode)
+        {
+            if (varName == null)
+                return null;
+
+            if (varName == "self") {
+                var selfStruct = ClosestStructContext (fromNode);
+                return selfStruct?.name;
+            }
+
+            // Innermost flow first: arguments, then temps, then outer flows, then globals
+            var flow = fromNode == null ? this : fromNode.ClosestFlowBase ();
+            while (flow != null) {
+                if (flow.arguments != null) {
+                    foreach (var arg in flow.arguments) {
+                        if (arg.identifier?.name == varName && arg.structTypeName != null)
+                            return arg.structTypeName;
+                    }
+                }
+
+                VariableAssignment localDecl;
+                if (flow.variableDeclarations != null
+                    && flow.variableDeclarations.TryGetValue (varName, out localDecl)
+                    && localDecl.structTypeName != null) {
+                    return localDecl.structTypeName;
+                }
+
+                if (flow is Story)
+                    break;
+                var parentObj = flow.parent;
+                flow = parentObj != null ? parentObj.ClosestFlowBase () : null;
+            }
+
+            // Story globals (in case the parent walk did not reach the story flow)
+            VariableAssignment globalDecl;
+            if (variableDeclarations != null
+                && variableDeclarations.TryGetValue (varName, out globalDecl)
+                && globalDecl.structTypeName != null) {
+                return globalDecl.structTypeName;
+            }
+
+            return null;
+        }
+
+        /// <summary>True if actualType is expectedType or inherits from it.</summary>
+        public bool StructTypeIsCompatible (string actualTypeName, string expectedTypeName)
+        {
+            if (actualTypeName == null || expectedTypeName == null)
+                return false;
+            if (actualTypeName == expectedTypeName)
+                return true;
+
+            var actual = ResolveStruct (actualTypeName);
+            if (actual == null)
+                return false;
+
+            var visiting = new HashSet<string> ();
+            var queue = new Queue<StructDeclaration> ();
+            queue.Enqueue (actual);
+            while (queue.Count > 0) {
+                var type = queue.Dequeue ();
+                if (!visiting.Add (type.name))
+                    continue;
+                if (type.name == expectedTypeName)
+                    return true;
+                if (type.baseTypes == null)
+                    continue;
+                foreach (var baseId in type.baseTypes) {
+                    var baseStruct = ResolveStruct (baseId?.name);
+                    if (baseStruct != null)
+                        queue.Enqueue (baseStruct);
+                }
+            }
+            return false;
+        }
+
         public static StructDeclaration ClosestStructContext (Parsed.Object fromNode)
         {
             var ancestor = fromNode;

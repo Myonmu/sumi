@@ -461,8 +461,10 @@ namespace Ink
         {
             // Possible forms:
             //  name
-            //  -> name      (variable divert target argument
+            //  name: StructType
+            //  -> name      (variable divert target argument)
             //  ref name
+            //  ref name: StructType
             //  ref -> name  (variable divert target by reference)
             var firstIden = Parse(IdentifierWithMetadata);
             Whitespace ();
@@ -504,6 +506,14 @@ namespace Ink
                 }
 
                 flowArg.isByReference = false;
+            }
+
+            // Optional struct type: name: Character / ref name: Character
+            Whitespace ();
+            if (ParseString (":") != null) {
+                Whitespace ();
+                var typeId = Expect (IdentifierWithMetadata, "struct type name") as Identifier;
+                flowArg.structTypeName = typeId?.name;
             }
 
             return flowArg;
