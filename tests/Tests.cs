@@ -995,14 +995,11 @@ Hello world
 ~ return
 ", testingErrors: true);
 
-            Assert.AreEqual(7, _errorMessages.Count);
-            Assert.IsTrue(_errorMessages[0].Contains("Return statements can only be used in knots that"));
-            Assert.IsTrue(_errorMessages[1].Contains("Functions cannot be stitches"));
-            Assert.IsTrue(_errorMessages[2].Contains("Functions may not contain stitches"));
-            Assert.IsTrue(_errorMessages[3].Contains("Functions may not contain diverts"));
-            Assert.IsTrue(_errorMessages[4].Contains("Functions may not contain choices"));
-            Assert.IsTrue(_errorMessages[5].Contains("Functions may not contain choices"));
-            Assert.IsTrue(_errorMessages[6].Contains("Return statements can only be used in knots that"));
+            // Function stitches are allowed; remaining purity rules still apply to === function ===
+            Assert.IsTrue(HadError("Functions may not contain stitches"));
+            Assert.IsTrue(HadError("Functions may not contain diverts"));
+            Assert.IsTrue(HadError("Functions may not contain choices"));
+            Assert.IsTrue(HadError("Return statements can only be used in knots that"));
         }
 
         [Test()]
@@ -4252,6 +4249,116 @@ VAR {0}z = -> {0}divert
 
                 Assert.IsNotNull(compiledStory);
             }
+        }
+
+        [Test()]
+        public void TestStructsBasicFieldsAndMethods()
+        {
+            var story = CompileString(@"
+=== struct Character ===
+VAR name = ""anonymous""
+VAR nerves = 1
+= function ReactFurious() =
+The heck you are doing?
+~ return
+
+=== struct Oswald: Character ===
+VAR name = ""Flinn Oswald""
+= function ReactFurious() =
+~ base.ReactFurious()
+Oh my goodness me!
+~ return
+
+VAR Oswald: Oswald
+
+-> start
+=== start ===
+{Oswald.name}
+~ Oswald.ReactFurious()
+-> END
+");
+            Assert.AreEqual("Flinn Oswald\nThe heck you are doing?\nOh my goodness me!\n", story.ContinueMaximally());
+        }
+
+        [Test()]
+        public void TestStructsTempCopyAndFieldAssign()
+        {
+            var story = CompileString(@"
+=== struct Character ===
+VAR name = ""anonymous""
+
+VAR Oswald: Character
+
+-> start
+=== start ===
+~ Oswald.name = ""Flinn""
+~ temp guest: Character = Oswald
+~ guest.name = ""Visitor""
+{Oswald.name}
+{guest.name}
+-> END
+");
+            Assert.AreEqual("Flinn\nVisitor\n", story.ContinueMaximally());
+        }
+
+        [Test()]
+        public void TestStructsRefVarAndInheritance()
+        {
+            var story = CompileString(@"
+=== struct Character ===
+VAR name = ""anonymous""
+= function ReactFurious() =
+angry
+~ return
+
+=== struct ISuspect ===
+= function IsSuspect() =
+~ return true
+
+=== struct Oswald: Character, ISuspect ===
+VAR name = ""Flinn Oswald""
+
+=== struct Party ===
+VAR leader: Character = Character
+REFVAR scout: Character = none
+
+VAR Oswald: Oswald
+VAR party: Party = Party
+
+-> start
+=== start ===
+~ party.scout = Oswald
+~ party.scout.ReactFurious()
+{party.scout.IsSuspect()}
+-> END
+");
+            Assert.AreEqual("angry\ntrue\n", story.ContinueMaximally());
+        }
+
+        [Test()]
+        public void TestStructsSaveLoadRoundTrip()
+        {
+            var story = CompileString(@"
+=== struct Character ===
+VAR name = ""anonymous""
+
+VAR Oswald: Character
+
+-> start
+=== start ===
+~ Oswald.name = ""Flinn""
+{Oswald.name}
+-> END
+");
+            Assert.AreEqual("Flinn\n", story.ContinueMaximally());
+
+            var json = story.state.ToJson();
+            story.state.LoadJson(json);
+            var oswald = story.variablesState.GetVariableWithName("Oswald") as Ink.Runtime.StructValue;
+            Assert.IsNotNull(oswald);
+            Assert.AreEqual("Character", oswald.value.typeName);
+            var nameVal = oswald.value.GetField("name") as Ink.Runtime.StringValue;
+            Assert.AreEqual("Flinn", nameVal.value);
         }
 
         private class TestWarningException : System.Exception
