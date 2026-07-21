@@ -1124,6 +1124,12 @@ namespace Ink.Runtime
             }
         }
 
+        /// <summary>
+        /// Whether the current context is printable.
+        /// An unprintable context can be in tag or command.
+        /// </summary>
+        public bool inPrintableContext = true;
+
         public void PushEvaluationStack(Runtime.Object obj)
         {
             // Include metadata about the origin List for list values when
