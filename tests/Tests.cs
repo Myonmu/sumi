@@ -4511,6 +4511,90 @@ VAR Oswald: Character
         }
 
         [Test()]
+        public void TestStructsVariablesStateDottedPathGetSet()
+        {
+            var story = CompileString(@"
+=== struct Character ===
+VAR name = ""anonymous""
+VAR nerves = 1
+
+=== struct Party ===
+VAR leader: Character = Character
+REFVAR scout: Character = none
+===
+VAR Oswald: Character
+VAR party: Party
+
+-> start
+=== start ===
+-> END
+");
+            Assert.AreEqual("anonymous", story.variablesState["Oswald.name"]);
+            Assert.AreEqual(1, story.variablesState["Oswald.nerves"]);
+
+            story.variablesState["Oswald.name"] = "Flinn";
+            story.variablesState["Oswald.nerves"] = 3;
+            Assert.AreEqual("Flinn", story.variablesState["Oswald.name"]);
+            Assert.AreEqual(3, story.variablesState["Oswald.nerves"]);
+
+            // Nested embed
+            story.variablesState["party.leader.name"] = "Boss";
+            Assert.AreEqual("Boss", story.variablesState["party.leader.name"]);
+
+            // REFVAR rebind + follow
+            story.variablesState["party.scout"] = "Oswald";
+            Assert.AreEqual("Flinn", story.variablesState["party.scout.name"]);
+            story.variablesState["party.scout.name"] = "ScoutName";
+            Assert.AreEqual("ScoutName", story.variablesState["Oswald.name"]);
+
+            story.variablesState["party.scout"] = null;
+            Assert.AreEqual(null, story.variablesState["party.scout"]);
+        }
+
+        [Test()]
+        public void TestStructsGlobalRefVar()
+        {
+            var story = CompileString(@"
+=== struct Character ===
+VAR name = ""anonymous""
+= function ReactFurious() =
+angry
+~ return
+
+=== struct Oswald: Character ===
+VAR name = ""Flinn Oswald""
+===
+VAR Oswald: Oswald
+VAR other: Character
+REFVAR active: Character = none
+REFVAR buddy: Character = Oswald
+
+-> start
+=== start ===
+{buddy.name}
+~ active = Oswald
+~ active.ReactFurious()
+{active.name}
+~ active.name = ""Renamed""
+{Oswald.name}
+{active is Oswald}
+~ active = none
+~ active = other
+{active.name}
+-> END
+");
+            Assert.AreEqual("Flinn Oswald\nangry\nFlinn Oswald\nRenamed\ntrue\nanonymous\n", story.ContinueMaximally());
+
+            // Game-side API: global REFVAR get/set
+            story.variablesState["active"] = "Oswald";
+            Assert.AreEqual("Renamed", story.variablesState["active.name"]);
+            story.variablesState["active.name"] = "FromGame";
+            Assert.AreEqual("FromGame", story.variablesState["Oswald.name"]);
+            story.variablesState["active"] = null;
+            Assert.AreEqual(null, story.variablesState["active"]);
+        }
+
+        [Test()]
         public void TestStructsExternalNoDuplicateWithFallback()
         {
             // EXTERNAL inside/after a struct used to be registered twice because
@@ -4531,6 +4615,81 @@ EXTERNAL DefineAttribute(varName,displayName,lowerBound,upperBound,evolutive)
 ");
             story.allowExternalFunctionFallbacks = true;
             Assert.AreEqual("true\n", story.ContinueMaximally());
+        }
+
+        [Test()]
+        public void TestStructsUnknownFieldAndMethodErrors()
+        {
+            CompileString(@"
+=== struct Character ===
+VAR name = ""anonymous""
+= function Greet() =
+~ return
+===
+VAR Oswald: Character
+
+-> start
+=== start ===
+{Oswald.noSuchField}
+-> END
+", testingErrors: true);
+            Assert.IsTrue(_errorMessages.Exists(m => m.Contains("no field named 'noSuchField'")),
+                "Expected missing-field error, got: " + string.Join(" | ", _errorMessages));
+
+            _errorMessages.Clear();
+            _warningMessages.Clear();
+            CompileString(@"
+=== struct Character ===
+VAR name = ""anonymous""
+= function Greet() =
+~ return
+===
+VAR Oswald: Character
+
+-> start
+=== start ===
+~ Oswald.noSuchMethod()
+-> END
+", testingErrors: true);
+            Assert.IsTrue(_errorMessages.Exists(m => m.Contains("no method named 'noSuchMethod'")),
+                "Expected missing-method error, got: " + string.Join(" | ", _errorMessages));
+
+            _errorMessages.Clear();
+            _warningMessages.Clear();
+            CompileString(@"
+=== struct Character ===
+VAR name = ""anonymous""
+= function Greet() =
+~ self.noSuchField
+~ return
+===
+VAR Oswald: Character
+
+-> start
+=== start ===
+~ Oswald.Greet()
+-> END
+", testingErrors: true);
+            Assert.IsTrue(_errorMessages.Exists(m => m.Contains("no field named 'noSuchField'")),
+                "Expected missing self-field error, got: " + string.Join(" | ", _errorMessages));
+
+            _errorMessages.Clear();
+            _warningMessages.Clear();
+            CompileString(@"
+=== struct Character ===
+VAR name = ""anonymous""
+= function Greet() =
+~ return
+===
+VAR Oswald: Character
+
+-> start
+=== start ===
+~ Oswald.noSuchField = 1
+-> END
+", testingErrors: true);
+            Assert.IsTrue(_errorMessages.Exists(m => m.Contains("no field named 'noSuchField'")),
+                "Expected missing-field assignment error, got: " + string.Join(" | ", _errorMessages));
         }
 
         [Test()]
