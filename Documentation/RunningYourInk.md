@@ -430,6 +430,130 @@ list.Without(otherList)    // equivalent to (list - otherList) in ink
 list.Contains(otherList)   // equivalent to (list ? otherList) in ink
 ```
 
+## Working with structs
+
+Structs group fields and methods for story entities. Authoring is covered in [Writing with ink — Structs](WritingWithInk.md#part-6-structs). From game code you interact with **global** instances only: temps live on the call stack and do not appear in `variablesState`.
+
+### Getting a global instance
+
+The `variablesState` indexer unwraps ink values. For a struct-typed global you get a `StructObject`:
+
+```csharp
+var oswald = story.variablesState["Oswald"] as Ink.Runtime.StructObject;
+string typeName = oswald.typeName; // concrete type, e.g. "Oswald"
+```
+
+You can also keep the wrapper:
+
+```csharp
+var oswaldVal = story.variablesState.GetVariableWithName("Oswald") as Ink.Runtime.StructValue;
+var oswald = oswaldVal?.value;
+```
+
+Each struct type also has a **default instance** stored as a global named after the type (for example `"Character"`).
+
+### Reading and writing fields
+
+The shortest way to get or set a field on a **global** instance is a dotted path on `variablesState`:
+
+```csharp
+string name = (string)story.variablesState["Oswald.name"];
+story.variablesState["Oswald.name"] = "Flinn";
+story.variablesState["Oswald.nerves"] = 3;
+
+// Nested embedded struct field
+story.variablesState["party.leader.name"] = "Boss";
+
+// REFVAR: set to a global name (or null for none); further segments follow the ref
+story.variablesState["party.scout"] = "Oswald";
+story.variablesState["active"] = "Oswald";  // top-level REFVAR global
+string scoutName = (string)story.variablesState["party.scout.name"];
+story.variablesState["party.scout"] = null;
+```
+
+You can still work with the `StructObject` directly when you need the full instance:
+
+```csharp
+var oswald = (Ink.Runtime.StructObject)story.variablesState["Oswald"];
+
+var nameVal = oswald.GetField("name") as Ink.Runtime.StringValue;
+string name = nameVal?.value;
+
+var nervesVal = oswald.GetField("nerves") as Ink.Runtime.IntValue;
+int nerves = nervesVal?.value ?? 0;
+
+// In-place mutation — no need to assign the global back
+oswald.SetField("name", new Ink.Runtime.StringValue("Flinn"));
+oswald.SetField("nerves", new Ink.Runtime.IntValue(3));
+```
+
+You may also replace an entire global instance:
+
+```csharp
+story.variablesState["Oswald"] = oswald; // Value.Create accepts StructObject
+```
+
+### REFVAR fields and globals
+
+`REFVAR` stores a reference to another **global** by name — either as a struct field or as a top-level global. With dotted paths:
+
+```csharp
+story.variablesState["party.scout"] = "Oswald";  // bind field
+story.variablesState["active"] = "Oswald";       // bind global REFVAR
+story.variablesState["party.scout"] = null;       // clear (none)
+story.variablesState["active"] = null;
+var scout = story.variablesState["party.scout"] as Ink.Runtime.StructObject;
+var active = story.variablesState["active"] as Ink.Runtime.StructObject;
+string name = (string)story.variablesState["active.name"];
+```
+
+You can also use `StructRefValue` directly on a `StructObject`:
+
+```csharp
+var party = (Ink.Runtime.StructObject)story.variablesState["party"];
+party.SetField("scout", new Ink.Runtime.StructRefValue("Oswald"));
+```
+
+### Calling member functions
+
+Use `EvaluateMethod` (not `EvaluateFunction`) so the runtime can supply `self` and perform virtual dispatch:
+
+```csharp
+string textOutput;
+object returnValue = story.EvaluateMethod(
+    "Oswald",           // global instance name
+    "ReactFurious",     // method name
+    out textOutput
+    /*, optional args... */
+);
+```
+
+You may also pass a `StructObject` or `StructValue` as the instance. Prefer the **global name** (`string`) when the method should mutate that global: the engine then passes `self` as a pointer to the variable. Passing a bare `StructObject` pushes a value copy as `self`.
+
+Virtual dispatch uses the instance’s concrete `typeName` and the story’s `structDefs` vtable. Calling `EvaluateFunction("Oswald.ReactFurious")` without a receiver is invalid for instance methods.
+
+Overload without text capture:
+
+```csharp
+object returnValue = story.EvaluateMethod("Oswald", "ReactFurious");
+```
+
+### Inspecting type metadata
+
+```csharp
+var def = story.structDefinitions.GetDefinition("Oswald");
+foreach (var field in def.fields) {
+    // field.name, field.kind (Var / RefVar), field.typeName
+}
+foreach (var method in def.methods) {
+    // method.Key = name, method.Value = runtime path (e.g. Oswald.static.ReactFurious)
+}
+```
+
+### Saving
+
+Struct globals (including nested embeds and `REFVAR` targets) are included in story state JSON with the rest of `variablesState`. Load/save through the usual `state.ToJson()` / `state.LoadJson(...)` APIs; no extra step is required for structs.
+
 ## Using the compiler
 
 Precompiling your stories is more efficient than loading .ink at runtime. That said, it's a useful approach for some situations, and can be done with the following code:

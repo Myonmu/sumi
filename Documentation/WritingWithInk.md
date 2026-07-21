@@ -1899,7 +1899,7 @@ Constants are simply a way to allow you to give story states easy-to-understand 
 
 ## 7) Advanced: Game-side logic
 
-There are two core ways to provide game hooks in the **ink** engine. External function declarations in ink allow you to directly call C# functions in the game, and variable observers are callbacks that are fired in the game when ink variables are modified. Both of these are described in [Running your ink](RunningYourInk.md).
+There are two core ways to provide game hooks in the **ink** engine. External function declarations in ink allow you to directly call C# functions in the game, and variable observers are callbacks that are fired in the game when ink variables are modified. Both of these are described in [Running your ink](RunningYourInk.md). For reading and writing **struct** fields and calling methods from the game, see [Working with structs](RunningYourInk.md#working-with-structs).
 
 # Part 4: Advanced Flow Control
 
