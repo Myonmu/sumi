@@ -38,6 +38,7 @@ Struct definitions reuse knot-shaped syntax. The keyword `struct` is reserved.
 
 - **Fields** — declared with `VAR` or `REFVAR` inside the struct body.
 - **Methods** — declared as function stitches (`= function Name(...) =`).
+- **Narrative stitches** — declared like knot stitches (`= Name(...)`); entered with jump/tunnel divert; virtual override by matching author-facing signature.
 - **Externals** — `EXTERNAL` stubs are allowed the same way as for ordinary functions; a matching function stitch may provide a fallback body.
 
 ```ink
@@ -54,15 +55,19 @@ EXTERNAL Func2(arg1)
 = function Func2(arg1) =
 ~ return
 
+= scene_bit(who)
+Hello, {who} — {self.strField}.
+->->
+
 ```
 
 Rules:
 
 - A struct name must not collide with a knot, list, or global variable of the same name.
-- Member names must be unique within the struct’s flattened member set (after inheritance).
+- Member names must be unique within the struct’s flattened member set (after inheritance). A name cannot be both a method and a narrative stitch.
 - The identifier `static` is reserved and must not be used as a field or method name.
-- The identifier `base` is reserved inside method bodies (see [Calling base implementations](#calling-base-implementations)).
-- Structs are not narrative entry points: you cannot `-> SomeStruct` as a knot divert. Methods are functions, not stitches you weave into.
+- The identifier `base` is reserved inside method and stitch bodies (see [Calling base implementations](#calling-base-implementations)).
+- Structs are not narrative entry points: you cannot `-> SomeStruct` as a knot divert. Methods are functions (call only). Narrative stitches are divert/tunnel targets (`-> instance.stitch`), not callable as `~ instance.stitch()`.
 
 ---
 
@@ -571,6 +576,45 @@ Member functions are ordinary ink **functions**:
 - Choices and nested stitches inside methods follow the same restrictions as today’s functions (no gathering points / choices that escape function semantics — same compiler rules as `=== function`).
 
 Calling convention details (receiver, stack order, `base`, externals) are specified in [Calling convention](#calling-convention).
+
+---
+
+## Narrative stitches (content and control flow)
+
+Struct **narrative stitches** are declared like stitches inside a knot (no `function` keyword). They are first-class divert/tunnel targets with virtual dispatch:
+
+```ink
+=== struct Scene ===
+VAR title = "..."
+= intro(who)
+{self.title}: Hello, {who}!
+* [Wave] -> wave
+- ->->
+= wave
+You wave.
+->->
+===
+
+=== struct BossScene: Scene ===
+= intro(who)
+-> base.intro(who) ->
+The boss glowers.
+->->
+===
+
+VAR fight: BossScene
+-> fight.intro("hero") ->
+```
+
+Rules:
+
+- Enter with jump `-> recv.stitch(args)` or tunnel `-> recv.stitch(args) ->` (also `self.stitch` / type default instance).
+- Implicit `ref self` is prepended (same as methods). Author-facing parameters form the **signature**.
+- Override: same name **and** matching author-facing signature (arity, `ref` / `->` flags, struct types) replaces the inherited slot and records a base path. Same name with a different signature is a compile error (no overloads).
+- `-> base.stitch(args)` / `-> base.stitch(args) ->` is only valid inside a stitch that overrides that name; it jumps/tunnels to the compile-time inherited container (no vtable).
+- Sibling stitches in the same struct can be diverted to by bare name (`-> wave`), which binds `self` like `-> self.wave`.
+- Bodies may include choices, gathers, labels, and diverts (full stitch weave). Blank lines do not end the body.
+- Narrative stitches cannot be called as functions (`~ recv.stitch()` is an error).
 
 ---
 

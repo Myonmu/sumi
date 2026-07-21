@@ -263,14 +263,7 @@ namespace Ink.Parsed
 
         Stitch ClosestStructMethod ()
         {
-            var ancestor = parent;
-            while (ancestor != null) {
-                var stitch = ancestor as Stitch;
-                if (stitch != null && stitch.isFunction && ancestor.parent is StructDeclaration)
-                    return stitch;
-                ancestor = ancestor.parent;
-            }
-            return null;
+            return Story.ClosestStructMethod (this);
         }
 
         public override void ResolveReferences (Story context)

@@ -1776,6 +1776,13 @@ namespace Ink.Runtime
                 return true;
             }
 
+            // Virtual / base narrative stitch divert or tunnel
+            else if (contentObj is StructStitchDivert) {
+                var stitchDivert = (StructStitchDivert)contentObj;
+                PerformStructStitchDivert (stitchDivert);
+                return true;
+            }
+
             // Native function call
             else if (contentObj is NativeFunctionCall) {
                 var func = (NativeFunctionCall)contentObj;
@@ -2001,6 +2008,44 @@ namespace Ink.Runtime
 
             if (state.divertedPointer.isNull)
                 Error ("Struct method path not found: " + pathStr);
+        }
+
+        void PerformStructStitchDivert (StructStitchDivert divert)
+        {
+            // Stack: receiverPtr, arg0, ... argN (argN on top)
+            var args = new List<Runtime.Object> ();
+            for (int i = 0; i < divert.argumentCount; i++)
+                args.Insert (0, state.PopEvaluationStack ());
+
+            var receiver = state.PopEvaluationStack ();
+
+            string pathStr = divert.targetPathString;
+            if (!divert.isBaseCall) {
+                var instance = ResolveStructInstance (receiver);
+                if (instance == null) {
+                    Error ("Cannot divert to stitch '" + divert.stitchName + "' on non-struct / none");
+                    return;
+                }
+                StructDeclaration typeDesc = _structDefinitions?.GetDefinition (instance.typeName);
+                if (typeDesc == null || !typeDesc.TryGetStitchPath (divert.stitchName, out pathStr)) {
+                    Error ("Stitch '" + divert.stitchName + "' not found on struct '" + instance.typeName + "'");
+                    return;
+                }
+            }
+
+            // Push receiver then args for stitch parameter entry (same as methods / knots)
+            state.PushEvaluationStack (receiver);
+            foreach (var a in args)
+                state.PushEvaluationStack (a);
+
+            var path = new Path (pathStr);
+            state.divertedPointer = PointerAtPath (path);
+
+            if (divert.isTunnel)
+                state.callStack.Push (PushPopType.Tunnel, outputStreamLengthWithPushed: state.outputStream.Count);
+
+            if (state.divertedPointer.isNull)
+                Error ("Struct stitch path not found: " + pathStr);
         }
 
         /// <summary>

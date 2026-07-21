@@ -72,6 +72,38 @@ namespace Ink.Runtime
     }
 
     /// <summary>
+    /// Virtual (or base) narrative stitch divert / tunnel.
+    /// Stack (bottom→top): receiver pointer, arg0, arg1, ... argN
+    /// Same entry convention as StructMethodCall, but uses Tunnel or plain divert.
+    /// </summary>
+    public class StructStitchDivert : Runtime.Object
+    {
+        public string stitchName { get; set; }
+        public int argumentCount { get; set; }
+        public bool isBaseCall { get; set; }
+        public bool isTunnel { get; set; }
+        /// <summary>For base calls: compile-time path. For virtual: unused (vtable lookup).</summary>
+        public string targetPathString { get; set; }
+
+        public StructStitchDivert (string stitchName, int argumentCount, bool isBaseCall = false, bool isTunnel = false, string targetPathString = null)
+        {
+            this.stitchName = stitchName;
+            this.argumentCount = argumentCount;
+            this.isBaseCall = isBaseCall;
+            this.isTunnel = isTunnel;
+            this.targetPathString = targetPathString;
+        }
+
+        public StructStitchDivert () {}
+
+        public override string ToString ()
+        {
+            var kind = isBaseCall ? "BaseStitchDivert" : "StructStitchDivert";
+            return kind + "(" + stitchName + "," + argumentCount + (isTunnel ? ",tunnel" : "") + ")";
+        }
+    }
+
+    /// <summary>
     /// Push a deep copy of the default instance for a struct type (by type name on stack as StringValue),
     /// or create from type name stored on this instruction.
     /// </summary>

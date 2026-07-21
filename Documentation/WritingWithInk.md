@@ -3406,13 +3406,13 @@ Example:
 
 Lists are excellent for tracking discrete story states. **Structs** are for *entities* — characters, items, factions — that need several fields and shared behaviour in one place.
 
-A struct groups fields and methods. You declare typed variables that hold instances, read and write fields with dotted paths, and call methods on those instances. Inheritance lets subtypes override defaults and methods.
+A struct groups fields, methods, and optional narrative stitches. You declare typed variables that hold instances, read and write fields with dotted paths, call methods on those instances, and divert/tunnel into stitches. Inheritance lets subtypes override defaults, methods, and stitches.
 
-Structs are not narrative entry points: you cannot `-> SomeStruct` the way you divert to a knot. Methods are functions (they may print text and `~ return`), not stitches you weave into.
+Structs are not narrative entry points: you cannot `-> SomeStruct` the way you divert to a knot. Methods are functions (call with `~ instance.Method()`). Narrative stitches are divert targets (`-> instance.stitch`), not function calls.
 
 ## 1) Defining a struct
 
-Use knot-shaped syntax with the `struct` keyword. Put **fields before methods**. Methods are function stitches:
+Use knot-shaped syntax with the `struct` keyword. Put **fields before members**. Methods are function stitches; narrative stitches omit `function`:
 
 	=== struct Character ===
 	VAR name = "anonymous"
@@ -3421,10 +3421,16 @@ Use knot-shaped syntax with the `struct` keyword. Put **fields before methods**.
 	The heck you are doing?
 	~ return
 
+	=== struct Scene ===
+	VAR title = "..."
+	= intro(who)
+	{self.title}: Hello, {who}!
+	->->
+
 Rules of thumb:
 
-- Field and method names must be unique within the struct (including inherited members).
-- `self`, `base`, and `static` are reserved and cannot be field or method names.
+- Field, method, and stitch names must be unique within the struct (including inherited members). A name cannot be both a method and a stitch.
+- `self`, `base`, and `static` are reserved and cannot be field or member names.
 - `EXTERNAL` lines are allowed inside a struct (same idea as for ordinary functions); a matching function stitch can act as a fallback when the game has not bound the external.
 
 Close a struct with a boundary of **three or more** `=` characters (`===`, `====`, …) before any top-level content that would otherwise look like more fields (especially typed globals). A following knot or struct title (`=== start ===`, `=== struct Other ===`) also ends the body. Without that marker, a `VAR` after the fields is treated as another field:
@@ -3519,6 +3525,32 @@ When a subtype overrides a method, use `base` to call the inherited version:
 
 `base.SomeMethod(...)` only works inside a method that overrides `SomeMethod`.
 
+### Narrative stitches
+
+Declare stitches without `function`. Enter them with jump or tunnel; they get implicit `ref self` and may take parameters (the author-facing signature):
+
+	=== struct Scene ===
+	VAR title = "Base"
+	= intro(who)
+	{self.title} greets {who}.
+	->->
+	===
+
+	=== struct BossScene: Scene ===
+	VAR title = "Boss"
+	= intro(who)
+	-> base.intro(who) ->
+	The boss glowers.
+	->->
+	===
+
+	VAR fight: BossScene
+	-> fight.intro("hero") ->
+
+- Override requires the same name and the same author-facing parameter signature as the inherited stitch.
+- `-> base.stitch` / `-> base.stitch ->` only works inside a stitch that overrides that name.
+- Stitches may contain choices and sibling divert targets (`-> wave`); they cannot be called as `~ fight.intro()`.
+
 ## 4) Inheritance
 
 A struct can list one or more base types after a colon:
@@ -3532,7 +3564,8 @@ A struct can list one or more base types after a colon:
 
 - Redeclared fields override the inherited **default value**.
 - Redeclared methods override the inherited implementation (virtual dispatch uses the instance’s concrete type).
-- Multiple inheritance is allowed; methods and fields are merged in declaration order of the bases, with the child’s own members winning.
+- Redeclared narrative stitches override when the author-facing signature matches (virtual divert/tunnel uses the concrete type).
+- Multiple inheritance is allowed; methods, stitches, and fields are merged in declaration order of the bases, with the child’s own members winning.
 
 A variable typed as a base can hold a subtype instance. Method calls on it are still virtual:
 
@@ -3581,13 +3614,14 @@ Rebinding `party.scout` or `active` changes which global is referred to; it does
 ## 6) Summary
 
 - Define types with `=== struct Name ===` (optional `: Base1, Base2`).
-- Fields and globals: `VAR` / `REFVAR` first; then `= function Method() =` methods.
+- Fields and globals: `VAR` / `REFVAR` first; then `= function Method() =` methods and/or `= stitch` narrative stitches.
 - End the struct body with `===` (3+ equals) before top-level globals, or continue with another knot/struct title.
 - Instantiate with `VAR x: Type` or `temp x: Type` (optional `= initializer`).
-- Inside methods use `self.field` / `self.Method()` (and `base.Method()` when overriding); bare names are globals, not members.
+- Inside methods/stitches use `self.field` / `self.Method()` (and `base.Method()` / `-> base.stitch` when overriding); bare names are globals, not members.
+- Divert/tunnel into stitches: `-> instance.stitch(args)` / `-> instance.stitch(args) ->`.
 - Value fields/`VAR`s copy; `REFVAR` fields and globals rebind to globals (or `none`).
 - `is` / `isnt` test runtime type against a struct type (including inheritance).
-- Structs are not divert targets.
+- Struct type names are not divert targets; methods are call-only; stitches are divert-only.
 
 For reading and writing struct state from game code, see [Working with structs](RunningYourInk.md#working-with-structs) in *Running your ink*.
 

@@ -285,6 +285,19 @@ namespace Ink.Runtime
                 return;
             }
 
+            var structStitchDivert = obj as StructStitchDivert;
+            if (structStitchDivert) {
+                writer.WriteObjectStart ();
+                writer.WriteProperty (structStitchDivert.isBaseCall ? "sbasedivert" : "sdivert", structStitchDivert.stitchName);
+                writer.WriteProperty ("argc", structStitchDivert.argumentCount);
+                if (structStitchDivert.isTunnel)
+                    writer.WriteProperty ("tunnel", true);
+                if (structStitchDivert.targetPathString != null)
+                    writer.WriteProperty ("path", structStitchDivert.targetPathString);
+                writer.WriteObjectEnd ();
+                return;
+            }
+
             // Void
             var voidObj = obj as Void;
             if (voidObj) {
@@ -467,6 +480,14 @@ namespace Ink.Runtime
                     int argc = obj.TryGetValue ("argc", out propValue) ? (int)propValue : 0;
                     string path = obj.TryGetValue ("path", out propValue) ? (string)propValue : null;
                     return new StructMethodCall (methodName, argc, isBase, path);
+                }
+                if (obj.TryGetValue ("sdivert", out propValue) || obj.TryGetValue ("sbasedivert", out propValue)) {
+                    bool isBase = obj.ContainsKey ("sbasedivert");
+                    string stitchName = (string)(isBase ? obj ["sbasedivert"] : obj ["sdivert"]);
+                    int argc = obj.TryGetValue ("argc", out propValue) ? (int)propValue : 0;
+                    bool isTunnel = obj.TryGetValue ("tunnel", out propValue) && propValue is bool && (bool)propValue;
+                    string path = obj.TryGetValue ("path", out propValue) ? (string)propValue : null;
+                    return new StructStitchDivert (stitchName, argc, isBase, isTunnel, path);
                 }
 
                 // Divert
@@ -858,6 +879,24 @@ namespace Ink.Runtime
                 writer.WritePropertyEnd ();
             }
 
+            if (def.stitches != null && def.stitches.Count > 0) {
+                writer.WritePropertyStart ("stitches");
+                writer.WriteObjectStart ();
+                foreach (var kv in def.stitches)
+                    writer.WriteProperty (kv.Key, kv.Value);
+                writer.WriteObjectEnd ();
+                writer.WritePropertyEnd ();
+            }
+
+            if (def.stitchBaseCalls != null && def.stitchBaseCalls.Count > 0) {
+                writer.WritePropertyStart ("stitchBaseCalls");
+                writer.WriteObjectStart ();
+                foreach (var kv in def.stitchBaseCalls)
+                    writer.WriteProperty (kv.Key, kv.Value);
+                writer.WriteObjectEnd ();
+                writer.WritePropertyEnd ();
+            }
+
             writer.WriteObjectEnd ();
         }
 
@@ -907,7 +946,21 @@ namespace Ink.Runtime
                         baseCalls [m.Key] = (string)m.Value;
                 }
 
-                allDefs.Add (new StructDeclaration (name, bases, fields, methods, baseCalls));
+                var stitches = new Dictionary<string, string> ();
+                object stitchesObj;
+                if (defJson.TryGetValue ("stitches", out stitchesObj)) {
+                    foreach (var m in (Dictionary<string, object>)stitchesObj)
+                        stitches [m.Key] = (string)m.Value;
+                }
+
+                var stitchBaseCalls = new Dictionary<string, string> ();
+                object stitchBaseCallsObj;
+                if (defJson.TryGetValue ("stitchBaseCalls", out stitchBaseCallsObj)) {
+                    foreach (var m in (Dictionary<string, object>)stitchBaseCallsObj)
+                        stitchBaseCalls [m.Key] = (string)m.Value;
+                }
+
+                allDefs.Add (new StructDeclaration (name, bases, fields, methods, baseCalls, stitches, stitchBaseCalls));
             }
 
             return new StructDefinitionsOrigin (allDefs);

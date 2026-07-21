@@ -4799,6 +4799,159 @@ EXTERNAL Foo(x)
             Assert.IsTrue(_errorMessages.Exists(m => m.Contains("Duplicate EXTERNAL")));
         }
 
+        [Test()]
+        public void TestStructsNarrativeStitchJumpTunnelAndSelf()
+        {
+            var story = CompileString(@"
+=== struct Scene ===
+VAR title = ""Scene""
+= intro(who)
+{self.title}: Hello, {who}!
+->->
+===
+
+VAR fight: Scene
+
+-> start
+=== start ===
+-> fight.intro(""hero"") ->
+Back from tunnel.
+-> END
+");
+            Assert.AreEqual("Scene: Hello, hero!\nBack from tunnel.\n", story.ContinueMaximally());
+        }
+
+        [Test()]
+        public void TestStructsNarrativeStitchOverrideAndBase()
+        {
+            var story = CompileString(@"
+=== struct Scene ===
+VAR title = ""Base""
+= intro(who)
+{self.title} greets {who}.
+->->
+===
+
+=== struct BossScene: Scene ===
+VAR title = ""Boss""
+= intro(who)
+-> base.intro(who) ->
+The boss glowers.
+->->
+===
+
+VAR fight: BossScene
+VAR someone: Scene = fight
+
+-> start
+=== start ===
+-> someone.intro(""hero"") ->
+Done.
+-> END
+");
+            Assert.AreEqual("Boss greets hero.\nThe boss glowers.\nDone.\n", story.ContinueMaximally());
+        }
+
+        [Test()]
+        public void TestStructsNarrativeStitchChoicesAndSiblingDivert()
+        {
+            var story = CompileString(@"
+=== struct Scene ===
+VAR title = ""S""
+= intro
+{self.title}
+* [Wave] -> wave
+- -> DONE
+= wave
+You wave.
+-> DONE
+===
+
+VAR fight: Scene
+
+-> start
+=== start ===
+-> fight.intro
+");
+            story.ContinueMaximally();
+            Assert.AreEqual(1, story.currentChoices.Count);
+            story.ChooseChoiceIndex(0);
+            Assert.AreEqual("You wave.\n", story.ContinueMaximally());
+        }
+
+        [Test()]
+        public void TestStructsNarrativeStitchSignatureMismatchError()
+        {
+            CompileString(@"
+=== struct Scene ===
+= intro(who)
+-> DONE
+===
+
+=== struct BossScene: Scene ===
+= intro()
+-> DONE
+===
+", testingErrors: true);
+            Assert.IsTrue(_errorMessages.Exists(m => m.Contains("different signature")),
+                "Expected signature mismatch error, got: " + string.Join(" | ", _errorMessages));
+        }
+
+        [Test()]
+        public void TestStructsNarrativeStitchMethodNameClashError()
+        {
+            CompileString(@"
+=== struct Scene ===
+= intro
+-> DONE
+= function intro() =
+~ return
+===
+", testingErrors: true);
+            Assert.IsTrue(_errorMessages.Exists(m => m.Contains("both a method and a stitch")),
+                "Expected method/stitch clash error, got: " + string.Join(" | ", _errorMessages));
+        }
+
+        [Test()]
+        public void TestStructsNarrativeStitchCannotCallAsFunction()
+        {
+            CompileString(@"
+=== struct Scene ===
+= intro
+Hi
+-> DONE
+===
+VAR fight: Scene
+
+-> start
+=== start ===
+~ fight.intro()
+-> END
+", testingErrors: true);
+            Assert.IsTrue(_errorMessages.Exists(m => m.Contains("cannot be called as a function")),
+                "Expected stitch-as-function error, got: " + string.Join(" | ", _errorMessages));
+        }
+
+        [Test()]
+        public void TestStructsMethodCannotDivert()
+        {
+            CompileString(@"
+=== struct Scene ===
+= function Speak() =
+Hi
+~ return
+===
+VAR fight: Scene
+
+-> start
+=== start ===
+-> fight.Speak
+-> END
+", testingErrors: true);
+            Assert.IsTrue(_errorMessages.Exists(m => m.Contains("can't be diverted") || m.Contains("only be called")),
+                "Expected method-divert error, got: " + string.Join(" | ", _errorMessages));
+        }
+
         private class TestWarningException : System.Exception
         { }
     }

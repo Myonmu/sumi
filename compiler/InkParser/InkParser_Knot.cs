@@ -110,16 +110,16 @@ namespace Ink
         }
 
         /// <summary>
-        /// Struct bodies accept fields, function stitches, and EXTERNAL lines.
+        /// Struct bodies accept fields, function methods, narrative stitches, and EXTERNAL lines.
         /// The body ends at a boundary of 3+ continuous '=' characters: either a bare
         /// <c>===</c> end marker (consumed), or the start of the next knot/struct
-        /// (left for the outer parser). Fields must appear before methods; after the
-        /// first method, VAR/EXTERNAL lines are left for top-level parsing.
+        /// (left for the outer parser). Fields must appear before members; after the
+        /// first method/stitch, VAR/EXTERNAL lines are left for top-level parsing.
         /// </summary>
         protected List<Parsed.Object> ParseStructBodyContent ()
         {
             var content = new List<Parsed.Object> ();
-            bool seenMethod = false;
+            bool seenMember = false;
 
             while (true) {
                 while (ParseNewline () != null) { }
@@ -128,9 +128,9 @@ namespace Ink
                 if (ParseStructEndBoundary ())
                     break;
 
-                // Fields before methods: once a method is seen, further VAR/EXTERNAL
+                // Fields before members: once a method/stitch is seen, further VAR/EXTERNAL
                 // belong at top level (after an explicit === if needed for clarity).
-                if (!seenMethod) {
+                if (!seenMember) {
                     var ext = ParseObject (Line (ExternalDeclaration)) as Parsed.Object;
                     if (ext != null) {
                         content.Add (ext);
@@ -147,10 +147,12 @@ namespace Ink
                 var stitchDecl = Parse (StitchDeclaration);
                 if (stitchDecl != null) {
                     Expect (EndOfLine, "end of line after stitch name", recoveryRule: SkipToNextLine);
-                    var stitchContent = ParseStructMethodBodyContent ();
+                    var stitchContent = stitchDecl.isFunction
+                        ? ParseStructMethodBodyContent ()
+                        : ParseStructStitchBodyContent ();
                     var stitch = new Stitch (stitchDecl.name, stitchContent, stitchDecl.arguments, stitchDecl.isFunction);
                     content.Add (stitch);
-                    seenMethod = true;
+                    seenMember = true;
                     continue;
                 }
 
@@ -272,6 +274,45 @@ namespace Ink
                     continue;
 
                 break;
+            }
+
+            if (content.Count == 0)
+                content.Add (new Parsed.Text (""));
+
+            return content;
+        }
+
+        /// <summary>
+        /// Narrative struct stitch bodies: full stitch-level statements (choices, gathers,
+        /// diverts, text/logic). Ends at the next stitch or knot/struct boundary (<c>===</c>);
+        /// blank lines do not terminate the body.
+        /// </summary>
+        protected List<Parsed.Object> ParseStructStitchBodyContent ()
+        {
+            var content = new List<Parsed.Object> ();
+
+            while (true) {
+                ParseCharactersFromString (" \t");
+                while (ParseNewline () != null)
+                    ParseCharactersFromString (" \t");
+
+                var endPeek = BeginRule ();
+                bool atEnd = PeekStructEndBoundary ()
+                    || Parse (StitchDeclaration) != null;
+                FailRule (endPeek);
+                if (atEnd)
+                    break;
+
+                var statement = StatementAtLevel (StatementLevel.Stitch);
+                if (statement == null)
+                    break;
+
+                if (statement is List<Parsed.Object> list)
+                    content.AddRange (list);
+                else if (statement is Parsed.Object obj)
+                    content.Add (obj);
+                else
+                    break;
             }
 
             if (content.Count == 0)

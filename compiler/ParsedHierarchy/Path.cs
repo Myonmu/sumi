@@ -183,6 +183,16 @@ namespace Ink.Parsed
                 return flowContext.ContentWithNameAtLevel (childName, minimumLevel, shouldDeepSearch);
             }
 
+            // Sibling narrative stitches inside a struct (not function methods —
+            // bare Helper() must still resolve to a global function, not self.Helper).
+            var structContext = context as StructDeclaration;
+            if (structContext != null && (ambiguousChildLevel || minimumLevel == FlowLevel.Stitch)) {
+                foreach (var stitch in structContext.ownStitches) {
+                    if (stitch.name == childName)
+                        return stitch;
+                }
+            }
+
             return null;
         }
 

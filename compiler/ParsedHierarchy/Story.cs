@@ -619,8 +619,34 @@ namespace Ink.Parsed
             var ancestor = fromNode;
             while (ancestor != null) {
                 var stitch = ancestor as Stitch;
-                if (stitch != null && stitch.isFunction && ancestor.parent is StructDeclaration)
+                if (stitch != null && ancestor.parent is StructDeclaration)
                     return (StructDeclaration)ancestor.parent;
+                ancestor = ancestor.parent;
+            }
+            return null;
+        }
+
+        /// <summary>Enclosing narrative (non-function) struct stitch, if any.</summary>
+        public static Stitch ClosestStructStitch (Parsed.Object fromNode)
+        {
+            var ancestor = fromNode;
+            while (ancestor != null) {
+                var stitch = ancestor as Stitch;
+                if (stitch != null && !stitch.isFunction && ancestor.parent is StructDeclaration)
+                    return stitch;
+                ancestor = ancestor.parent;
+            }
+            return null;
+        }
+
+        /// <summary>Enclosing function struct method, if any.</summary>
+        public static Stitch ClosestStructMethod (Parsed.Object fromNode)
+        {
+            var ancestor = fromNode;
+            while (ancestor != null) {
+                var stitch = ancestor as Stitch;
+                if (stitch != null && stitch.isFunction && ancestor.parent is StructDeclaration)
+                    return stitch;
                 ancestor = ancestor.parent;
             }
             return null;
@@ -641,13 +667,13 @@ namespace Ink.Parsed
 
             string root = path [0];
 
-            if (root == "self") {
-                type = ClosestStructContext (fromNode);
-                if (type == null) {
-                    if (reportErrors)
-                        fromNode.Error ("'self' is only valid inside a struct method", fromNode);
-                    return false;
-                }
+                if (root == "self") {
+                    type = ClosestStructContext (fromNode);
+                    if (type == null) {
+                        if (reportErrors)
+                            fromNode.Error ("'self' is only valid inside a struct method or stitch", fromNode);
+                        return false;
+                    }
                 memberStartIndex = 1;
                 return true;
             }
@@ -778,8 +804,180 @@ namespace Ink.Parsed
             }
 
             if (!typeCursor.HasMethod (methodName)) {
-                fromNode.Error ("Struct '" + typeCursor.name + "' has no method named '" + methodName + "'", fromNode);
+                if (typeCursor.HasStitch (methodName))
+                    fromNode.Error ("Stitch '" + methodName + "' cannot be called as a function; divert with '->' instead", fromNode);
+                else
+                    fromNode.Error ("Struct '" + typeCursor.name + "' has no method named '" + methodName + "'", fromNode);
             }
+        }
+
+        public void ValidateStructStitchDivert (IList<string> pathIncludingStitch, Parsed.Object fromNode, int explicitArgCount)
+        {
+            if (pathIncludingStitch == null || pathIncludingStitch.Count < 2)
+                return;
+
+            string stitchName = pathIncludingStitch [pathIncludingStitch.Count - 1];
+
+            if (pathIncludingStitch [0] == "base") {
+                var enclosing = ClosestStructStitch (fromNode);
+                var structDecl = enclosing?.parent as StructDeclaration;
+                if (structDecl == null || structDecl.stitchBaseCallPaths == null || !structDecl.stitchBaseCallPaths.ContainsKey (stitchName)) {
+                    fromNode.Error ("base." + stitchName + " is only valid inside an overriding stitch", fromNode);
+                    return;
+                }
+                var stitchInfo = structDecl.FindStitch (stitchName);
+                if (stitchInfo != null) {
+                    int expected = stitchInfo.authorArguments?.Count ?? 0;
+                    if (explicitArgCount != expected)
+                        fromNode.Error ("to 'base." + stitchName + "' requires " + expected + " arguments, but got " + explicitArgCount, fromNode);
+                }
+                return;
+            }
+
+            StructDeclaration type;
+            int start;
+            if (!TryResolveStructPathContext (pathIncludingStitch, fromNode, out type, out start)) {
+                fromNode.Error ("Cannot resolve struct type for '" + pathIncludingStitch [0] + "' in stitch divert", fromNode);
+                return;
+            }
+
+            int stitchIndex = pathIncludingStitch.Count - 1;
+            if (start > stitchIndex) {
+                fromNode.Error ("Missing stitch name in struct divert", fromNode);
+                return;
+            }
+
+            var typeCursor = type;
+            for (int i = start; i < stitchIndex; i++) {
+                var field = typeCursor.FindField (pathIncludingStitch [i]);
+                if (field == null) {
+                    fromNode.Error ("Struct '" + typeCursor.name + "' has no field named '" + pathIncludingStitch [i] + "'", fromNode);
+                    return;
+                }
+                if (string.IsNullOrEmpty (field.structTypeName)) {
+                    fromNode.Error ("Cannot divert through '" + pathIncludingStitch [i] + "' because it is not a struct-typed field", fromNode);
+                    return;
+                }
+                var next = ResolveStruct (field.structTypeName);
+                if (next == null) {
+                    fromNode.Error ("Unknown struct type '" + field.structTypeName + "' on field '" + pathIncludingStitch [i] + "'", fromNode);
+                    return;
+                }
+                typeCursor = next;
+            }
+
+            if (typeCursor.HasMethod (stitchName) && !typeCursor.HasStitch (stitchName)) {
+                fromNode.Error ("Method '" + stitchName + "' can't be diverted to. It can only be called as a function", fromNode);
+                return;
+            }
+
+            if (!typeCursor.HasStitch (stitchName)) {
+                fromNode.Error ("Struct '" + typeCursor.name + "' has no stitch named '" + stitchName + "'", fromNode);
+                return;
+            }
+
+            var info = typeCursor.FindStitch (stitchName);
+            int expectedArgs = info?.authorArguments?.Count ?? 0;
+            if (explicitArgCount != expectedArgs) {
+                fromNode.Error ("to '" + stitchName + "' requires " + expectedArgs + " arguments, but got " + explicitArgCount, fromNode);
+            }
+        }
+
+        /// <summary>
+        /// True when -> recv.stitch should use struct virtual stitch divert.
+        /// </summary>
+        public bool IsStructStitchDivertPath (IList<string> pathNames, Parsed.Object fromNode)
+        {
+            if (pathNames == null || pathNames.Count < 2)
+                return false;
+
+            string stitchName = pathNames [pathNames.Count - 1];
+
+            if (pathNames [0] == "base")
+                return true;
+
+            if (pathNames [0] == "self") {
+                var ctx = ClosestStructContext (fromNode);
+                return ctx != null && ctx.HasStitch (stitchName);
+            }
+
+            // Prefer ordinary knot.stitch diverts when a knot exists with that name
+            if (ContentWithNameAtLevel (pathNames [0], FlowLevel.Knot) != null)
+                return false;
+
+            StructDeclaration type;
+            int start;
+            if (!TryResolveStructPathContext (pathNames, fromNode, out type, out start, reportErrors: false)) {
+                if (structs == null || structs.Count == 0)
+                    return false;
+                if (!ResolveVariableWithName (pathNames [0], fromNode).found)
+                    return false;
+                // Struct-typed variable: treat as candidate; ResolveReferences validates
+                var typeName = ResolveStructTypeNameForName (pathNames [0], fromNode);
+                if (typeName == null)
+                    return false;
+                type = ResolveStruct (typeName);
+                if (type == null)
+                    return false;
+                start = 1;
+            }
+
+            var typeCursor = type;
+            int stitchIndex = pathNames.Count - 1;
+            for (int i = start; i < stitchIndex; i++) {
+                var field = typeCursor.FindField (pathNames [i]);
+                if (field == null || string.IsNullOrEmpty (field.structTypeName))
+                    return false;
+                typeCursor = ResolveStruct (field.structTypeName);
+                if (typeCursor == null)
+                    return false;
+            }
+
+            return typeCursor.HasStitch (stitchName);
+        }
+
+        /// <summary>
+        /// True when -> recv.Method targets a function method (illegal divert).
+        /// </summary>
+        public bool IsStructMethodDivertPath (IList<string> pathNames, Parsed.Object fromNode)
+        {
+            if (pathNames == null || pathNames.Count < 2)
+                return false;
+
+            string methodName = pathNames [pathNames.Count - 1];
+
+            if (pathNames [0] == "base" || pathNames [0] == "self") {
+                var ctx = ClosestStructContext (fromNode);
+                return ctx != null && ctx.HasMethod (methodName) && !ctx.HasStitch (methodName);
+            }
+
+            if (ContentWithNameAtLevel (pathNames [0], FlowLevel.Knot) != null)
+                return false;
+
+            StructDeclaration type;
+            int start;
+            if (!TryResolveStructPathContext (pathNames, fromNode, out type, out start, reportErrors: false)) {
+                var typeName = ResolveStructTypeNameForName (pathNames [0], fromNode);
+                if (typeName == null)
+                    return false;
+                type = ResolveStruct (typeName);
+                if (type == null)
+                    return false;
+                start = 1;
+            }
+
+            var typeCursor = type;
+            int methodIndex = pathNames.Count - 1;
+            for (int i = start; i < methodIndex; i++) {
+                var field = typeCursor.FindField (pathNames [i]);
+                if (field == null || string.IsNullOrEmpty (field.structTypeName))
+                    return false;
+                typeCursor = ResolveStruct (field.structTypeName);
+                if (typeCursor == null)
+                    return false;
+            }
+
+            return typeCursor.HasMethod (methodName) && !typeCursor.HasStitch (methodName);
         }
 
         public void DontFlattenContainer (Runtime.Container container)

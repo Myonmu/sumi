@@ -24,6 +24,9 @@ namespace Ink.Parsed
             }
         }
 
+        Runtime.StructStitchDivert _structStitchDivert;
+        List<string> _structStitchPathNames;
+
         public Divert (Parsed.Path target, List<Expression> arguments = null)
 		{
 			this.target = target;
@@ -50,6 +53,10 @@ namespace Ink.Parsed
                 return Runtime.ControlCommand.Done ();
             }
 
+            Runtime.Object structStitchRuntime;
+            if (TryGenerateStructStitchDivert (out structStitchRuntime))
+                return structStitchRuntime;
+
             runtimeDivert = new Runtime.Divert ();
 
             // Normally we resolve the target content during the
@@ -62,6 +69,10 @@ namespace Ink.Parsed
             // generate here.
             ResolveTargetContent ();
 
+            // Bare sibling stitch name inside a struct (e.g. -> wave) resolves to a
+            // Stitch under StructDeclaration; still needs self + virtual divert.
+            if (TryGenerateStructStitchDivertFromResolvedTarget (out structStitchRuntime))
+                return structStitchRuntime;
 
             CheckArgumentValidity ();
 
@@ -97,23 +108,7 @@ namespace Ink.Parsed
 
                         // Pass by reference: argument needs to be a variable reference
                         if (argExpected != null && argExpected.isByReference) {
-
-                            var varRef = argToPass as VariableReference;
-                            if (varRef == null) {
-                                Error ("Expected variable name to pass by reference to 'ref " + argExpected.identifier + "' but saw " + argToPass.ToString ());
-                                break;
-                            }
-
-                            // Check that we're not attempting to pass a read count by reference
-                            var targetPath = new Path(varRef.pathIdentifiers);
-                            Parsed.Object targetForCount = targetPath.ResolveFromContext (this);
-                            if (targetForCount != null) {
-                                Error ("can't pass a read count by reference. '" + targetPath.dotSeparatedComponents+"' is a knot/stitch/label, but '"+target.dotSeparatedComponents+"' requires the name of a VAR to be passed.");
-                                break;
-                            }
-
-                            var varPointer = new Runtime.VariablePointerValue (varRef.name);
-                            container.AddContent (varPointer);
+                            GenerateByRefArgument (container, argToPass, argExpected);
                         }
 
                         // Normal value being passed: evaluate it as normal
@@ -154,6 +149,164 @@ namespace Ink.Parsed
             }
 		}
 
+        void GenerateByRefArgument (Runtime.Container container, Expression argToPass, FlowBase.Argument argExpected)
+        {
+            var varRef = argToPass as VariableReference;
+            if (varRef == null) {
+                Error ("Expected variable name to pass by reference to 'ref " + argExpected.identifier + "' but saw " + argToPass.ToString ());
+                return;
+            }
+
+            // Check that we're not attempting to pass a read count by reference
+            var targetPath = new Path(varRef.pathIdentifiers);
+            Parsed.Object targetForCount = targetPath.ResolveFromContext (this);
+            if (targetForCount != null) {
+                Error ("can't pass a read count by reference. '" + targetPath.dotSeparatedComponents+"' is a knot/stitch/label, but '"+target.dotSeparatedComponents+"' requires the name of a VAR to be passed.");
+                return;
+            }
+
+            var varPointer = new Runtime.VariablePointerValue (varRef.name);
+            container.AddContent (varPointer);
+        }
+
+        bool TryGenerateStructStitchDivert (out Runtime.Object result)
+        {
+            result = null;
+            if (target == null || isThread || isFunctionCall)
+                return false;
+
+            var comps = target.components;
+            if (comps == null || comps.Count < 2)
+                return false;
+
+            var pathNames = new List<string> ();
+            foreach (var c in comps)
+                pathNames.Add (c.name);
+
+            var storyContext = story;
+            if (storyContext == null)
+                return false;
+
+            // Diverting to a function method is invalid — intercept before variable divert.
+            if (storyContext.IsStructMethodDivertPath (pathNames, this)) {
+                Error ("Method '" + pathNames [pathNames.Count - 1] + "' can't be diverted to. It can only be called as a function");
+                result = Runtime.ControlCommand.Done ();
+                return true;
+            }
+
+            if (!storyContext.IsStructStitchDivertPath (pathNames, this))
+                return false;
+
+            if (this.parent is DivertTarget) {
+                Error ("can't store a struct stitch divert target in a variable");
+                return false;
+            }
+
+            string stitchName = comps [comps.Count - 1].name;
+            bool isBase = comps [0].name == "base";
+
+            List<FlowBase.Argument> authorArgs = null;
+            if (!isBase) {
+                StructDeclaration recvType;
+                int start;
+                if (storyContext.TryResolveStructPathContext (pathNames, this, out recvType, out start, reportErrors: false)) {
+                    var typeCursor = recvType;
+                    for (int i = start; i < pathNames.Count - 1; i++) {
+                        var field = typeCursor.FindField (pathNames [i]);
+                        if (field == null || string.IsNullOrEmpty (field.structTypeName))
+                            break;
+                        typeCursor = storyContext.ResolveStruct (field.structTypeName);
+                        if (typeCursor == null)
+                            break;
+                    }
+                    authorArgs = typeCursor?.FindStitch (stitchName)?.authorArguments;
+                }
+            } else {
+                var enclosing = Story.ClosestStructStitch (this);
+                var structDecl = enclosing?.parent as StructDeclaration;
+                authorArgs = structDecl?.FindStitch (stitchName)?.authorArguments;
+            }
+
+            return EmitStructStitchDivert (pathNames, stitchName, isBase, authorArgs, out result);
+        }
+
+        bool TryGenerateStructStitchDivertFromResolvedTarget (out Runtime.Object result)
+        {
+            result = null;
+            if (isThread || isFunctionCall)
+                return false;
+
+            var stitch = targetContent as Stitch;
+            if (stitch == null || stitch.isFunction || !(stitch.parent is StructDeclaration))
+                return false;
+
+            if (this.parent is DivertTarget) {
+                Error ("can't store a struct stitch divert target in a variable");
+                return false;
+            }
+
+            // Diverting to a function method by bare name
+            // (shouldn't happen for isFunction stitches — filtered above)
+
+            var pathNames = new List<string> { "self", stitch.name };
+            return EmitStructStitchDivert (pathNames, stitchName: stitch.name, isBase: false, authorArgs: StructDeclaration.AuthorFacingArguments (stitch), out result);
+        }
+
+        bool EmitStructStitchDivert (List<string> pathNames, string stitchName, bool isBase, List<FlowBase.Argument> authorArgs, out Runtime.Object result)
+        {
+            result = null;
+            var container = new Runtime.Container ();
+
+            // Receiver + args must be pushed inside expression evaluation (same as knot divert args).
+            container.AddContent (Runtime.ControlCommand.EvalStart ());
+
+            if (isBase) {
+                container.AddContent (new Runtime.VariablePointerValue ("self"));
+            } else {
+                string root = pathNames [0];
+                if (root == "self") {
+                    container.AddContent (new Runtime.VariablePointerValue ("self"));
+                } else {
+                    container.AddContent (new Runtime.VariablePointerValue (root));
+                }
+                for (int i = 1; i < pathNames.Count - 1; i++) {
+                    if (pathNames [i] == "static")
+                        continue;
+                    container.AddContent (new Runtime.StructFieldGet (pathNames [i]));
+                }
+            }
+
+            if (arguments != null) {
+                for (var i = 0; i < arguments.Count; ++i) {
+                    Expression argToPass = arguments [i];
+                    FlowBase.Argument argExpected = null;
+                    if (authorArgs != null && i < authorArgs.Count)
+                        argExpected = authorArgs [i];
+
+                    if (argExpected != null && argExpected.isByReference)
+                        GenerateByRefArgument (container, argToPass, argExpected);
+                    else
+                        argToPass.GenerateIntoContainer (container);
+                }
+            }
+
+            container.AddContent (Runtime.ControlCommand.EvalEnd ());
+
+            int argc = arguments != null ? arguments.Count : 0;
+            string basePath = null;
+            if (isBase) {
+                var enclosing = Story.ClosestStructStitch (this);
+                var structDecl = enclosing?.parent as StructDeclaration;
+                if (structDecl != null && structDecl.stitchBaseCallPaths != null)
+                    structDecl.stitchBaseCallPaths.TryGetValue (stitchName, out basePath);
+            }
+
+            _structStitchDivert = new Runtime.StructStitchDivert (stitchName, argc, isBase, isTunnel, basePath);
+            _structStitchPathNames = pathNames;
+            container.AddContent (_structStitchDivert);
+            result = container;
+            return true;
+        }
 
         // When the divert is to a target that's actually a variable name
         // rather than an explicit knot/stitch name, try interpretting it
@@ -203,6 +356,27 @@ namespace Ink.Parsed
         public override void ResolveReferences(Story context)
 		{
             if (isEmpty || isEnd || isDone) {
+                return;
+            }
+
+            // Late detection: GenerateRuntimeObject may have run before structs were registered
+            if (_structStitchDivert == null && target != null && target.components != null && target.components.Count >= 2) {
+                var pathNames = new List<string> ();
+                foreach (var c in target.components)
+                    pathNames.Add (c.name);
+                if (context.IsStructStitchDivertPath (pathNames, this)) {
+                    // Should not happen if story was available during codegen
+                    Error ("Internal error: struct stitch divert was not generated for '" + target.dotSeparatedComponents + "'");
+                }
+            }
+
+            if (_structStitchDivert != null) {
+                if (arguments != null) {
+                    foreach (var arg in arguments)
+                        arg.ResolveReferences (context);
+                }
+                int argc = arguments != null ? arguments.Count : 0;
+                context.ValidateStructStitchDivert (_structStitchPathNames, this, argc);
                 return;
             }
 
@@ -419,4 +593,3 @@ namespace Ink.Parsed
 
 	}
 }
-

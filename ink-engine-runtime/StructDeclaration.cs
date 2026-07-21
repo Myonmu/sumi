@@ -37,6 +37,10 @@ namespace Ink.Runtime
         public Dictionary<string, string> methods { get; private set; }
         /// <summary>Override method → inherited implementation path for base calls.</summary>
         public Dictionary<string, string> baseCalls { get; private set; }
+        /// <summary>Flattened narrative stitch name → divert path string.</summary>
+        public Dictionary<string, string> stitches { get; private set; }
+        /// <summary>Override stitch → inherited implementation path for base diverts.</summary>
+        public Dictionary<string, string> stitchBaseCalls { get; private set; }
 
         Dictionary<string, StructFieldSlot> _fieldsByName;
 
@@ -45,13 +49,17 @@ namespace Ink.Runtime
             List<string> bases,
             List<StructFieldSlot> fields,
             Dictionary<string, string> methods,
-            Dictionary<string, string> baseCalls = null)
+            Dictionary<string, string> baseCalls = null,
+            Dictionary<string, string> stitches = null,
+            Dictionary<string, string> stitchBaseCalls = null)
         {
             this.name = name;
             this.bases = bases ?? new List<string> ();
             this.fields = fields ?? new List<StructFieldSlot> ();
             this.methods = methods ?? new Dictionary<string, string> ();
             this.baseCalls = baseCalls ?? new Dictionary<string, string> ();
+            this.stitches = stitches ?? new Dictionary<string, string> ();
+            this.stitchBaseCalls = stitchBaseCalls ?? new Dictionary<string, string> ();
 
             _fieldsByName = new Dictionary<string, StructFieldSlot> ();
             foreach (var field in this.fields)
@@ -76,6 +84,16 @@ namespace Ink.Runtime
         public bool TryGetBaseCallPath (string methodName, out string path)
         {
             return baseCalls.TryGetValue (methodName, out path);
+        }
+
+        public bool TryGetStitchPath (string stitchName, out string path)
+        {
+            return stitches.TryGetValue (stitchName, out path);
+        }
+
+        public bool TryGetStitchBaseCallPath (string stitchName, out string path)
+        {
+            return stitchBaseCalls.TryGetValue (stitchName, out path);
         }
     }
 }
