@@ -221,6 +221,22 @@ namespace Ink.Parsed
             _linearized = true;
         }
 
+        public StructFieldInfo FindField (string fieldName)
+        {
+            if (fieldName == null || flattenedFields == null)
+                return null;
+            foreach (var field in flattenedFields) {
+                if (field.name == fieldName)
+                    return field;
+            }
+            return null;
+        }
+
+        public bool HasMethod (string methodName)
+        {
+            return methodName != null && flattenedMethods != null && flattenedMethods.ContainsKey (methodName);
+        }
+
         bool _linearized;
 
         bool HasBaseCycle (Dictionary<string, StructDeclaration> allStructs, HashSet<string> visiting)

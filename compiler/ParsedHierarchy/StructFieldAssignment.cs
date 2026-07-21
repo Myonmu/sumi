@@ -64,7 +64,12 @@ namespace Ink.Parsed
         public override void ResolveReferences (Story context)
         {
             base.ResolveReferences (context);
-            // Validation deferred to VariableReference-style checks in later passes
+
+            var path = new List<string> ();
+            foreach (var id in pathIdentifiers)
+                path.Add (id?.name);
+
+            context.ValidateStructFieldAccess (path, this);
         }
 
         public override string typeName {

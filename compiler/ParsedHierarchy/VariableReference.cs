@@ -186,44 +186,13 @@ namespace Ink.Parsed
             }
 
             if (!context.ResolveVariableWithName (this.name, fromNode: this).found) {
-                // Bare field inside method?
-                if (TryResolveAsSelfField (context))
-                    return;
                 Error("Unresolved variable: "+this.ToString(), this);
             }
         }
 
         void ValidateStructFieldPath (Story context)
         {
-            // Light validation: ensure not diverting into struct type as knot
-        }
-
-        bool TryResolveAsSelfField (Story context)
-        {
-            var method = ClosestStructMethod ();
-            if (method == null)
-                return false;
-            var structDecl = method.parent as StructDeclaration;
-            if (structDecl == null)
-                return false;
-
-            foreach (var field in structDecl.flattenedFields) {
-                if (field.name == path [0])
-                    return true;
-            }
-            return false;
-        }
-
-        Stitch ClosestStructMethod ()
-        {
-            var ancestor = parent;
-            while (ancestor != null) {
-                var stitch = ancestor as Stitch;
-                if (stitch != null && stitch.isFunction && ancestor.parent is StructDeclaration)
-                    return stitch;
-                ancestor = ancestor.parent;
-            }
-            return null;
+            context.ValidateStructFieldAccess (path, this);
         }
 
         public override string ToString ()

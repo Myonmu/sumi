@@ -184,6 +184,18 @@ namespace Ink.Parsed
             if (comps == null || comps.Count < 2)
                 return false;
 
+            var pathNames = new List<string> ();
+            foreach (var c in comps)
+                pathNames.Add (c.name);
+
+            // Only treat as a struct method call when the receiver is a struct context
+            if (pathNames [0] != "base") {
+                StructDeclaration recvType;
+                int start;
+                if (!story.TryResolveStructPathContext (pathNames, this, out recvType, out start, reportErrors: false))
+                    return false;
+            }
+
             string methodName = comps [comps.Count - 1].name;
             bool isBase = comps [0].name == "base";
 
@@ -198,13 +210,11 @@ namespace Ink.Parsed
                 } else {
                     container.AddContent (new Runtime.VariablePointerValue (root));
                 }
-                // Intermediate fields: Oswald not nested; party.scout.Method
+                // Intermediate fields: party.scout.Method
                 for (int i = 1; i < comps.Count - 1; i++) {
                     if (comps [i].name == "static")
                         continue;
                     container.AddContent (new Runtime.StructFieldGet (comps [i].name));
-                    // After get we have a value; for method call need pointer to that instance.
-                    // If it's a REFVAR target StructValue, ResolveStructInstance works on StructValue.
                 }
             }
 
@@ -241,24 +251,37 @@ namespace Ink.Parsed
 
         public override void ResolveReferences (Story context)
         {
-            // Struct method calls shouldn't use proxy divert resolution
             var comps = _proxyDivert.target?.components;
             if (comps != null && comps.Count >= 2) {
-                // Resolve arguments only
-                if (arguments != null) {
-                    foreach (var arg in arguments)
-                        arg.ResolveReferences (context);
+                var pathNames = new List<string> ();
+                foreach (var c in comps)
+                    pathNames.Add (c.name);
+
+                bool isStructCall = pathNames [0] == "base";
+                if (!isStructCall) {
+                    StructDeclaration recvType;
+                    int start;
+                    isStructCall = context.TryResolveStructPathContext (pathNames, this, out recvType, out start, reportErrors: false);
                 }
 
-                if (comps [0].name == "base") {
-                    var method = ClosestStructMethod ();
-                    var structDecl = method?.parent as StructDeclaration;
-                    string methodName = comps [comps.Count - 1].name;
-                    if (structDecl == null || structDecl.baseCallPaths == null || !structDecl.baseCallPaths.ContainsKey (methodName)) {
-                        Error ("base." + methodName + "() is only valid inside an overriding method");
+                if (isStructCall) {
+                    if (arguments != null) {
+                        foreach (var arg in arguments)
+                            arg.ResolveReferences (context);
                     }
+
+                    if (pathNames [0] == "base") {
+                        var method = ClosestStructMethod ();
+                        var structDecl = method?.parent as StructDeclaration;
+                        string methodName = pathNames [pathNames.Count - 1];
+                        if (structDecl == null || structDecl.baseCallPaths == null || !structDecl.baseCallPaths.ContainsKey (methodName)) {
+                            Error ("base." + methodName + "() is only valid inside an overriding method");
+                        }
+                    } else {
+                        context.ValidateStructMethodCall (pathNames, this);
+                    }
+                    return;
                 }
-                return;
             }
 
             base.ResolveReferences (context);

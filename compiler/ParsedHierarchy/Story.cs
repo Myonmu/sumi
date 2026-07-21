@@ -509,6 +509,188 @@ namespace Ink.Parsed
             return null;
         }
 
+        public VariableAssignment ResolveVariableDeclaration (string varName, Parsed.Object fromNode)
+        {
+            if (varName == null)
+                return null;
+
+            var ownerFlow = fromNode == null ? this : fromNode.ClosestFlowBase ();
+            if (ownerFlow != null && ownerFlow != this
+                && ownerFlow.variableDeclarations != null
+                && ownerFlow.variableDeclarations.ContainsKey (varName)) {
+                return ownerFlow.variableDeclarations [varName];
+            }
+
+            VariableAssignment globalDecl;
+            if (variableDeclarations.TryGetValue (varName, out globalDecl))
+                return globalDecl;
+
+            return null;
+        }
+
+        public static StructDeclaration ClosestStructContext (Parsed.Object fromNode)
+        {
+            var ancestor = fromNode;
+            while (ancestor != null) {
+                var stitch = ancestor as Stitch;
+                if (stitch != null && stitch.isFunction && ancestor.parent is StructDeclaration)
+                    return (StructDeclaration)ancestor.parent;
+                ancestor = ancestor.parent;
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Resolve the static struct type for a dotted receiver / field path.
+        /// memberStartIndex is the first field (or method) component after the root / Type.static / Type.Instance prefix.
+        /// Returns false when the path is not a struct member path.
+        /// </summary>
+        public bool TryResolveStructPathContext (IList<string> path, Parsed.Object fromNode, out StructDeclaration type, out int memberStartIndex, bool reportErrors = true)
+        {
+            type = null;
+            memberStartIndex = 1;
+
+            if (path == null || path.Count < 1)
+                return false;
+
+            string root = path [0];
+
+            if (root == "self") {
+                type = ClosestStructContext (fromNode);
+                if (type == null) {
+                    if (reportErrors)
+                        fromNode.Error ("'self' is only valid inside a struct method", fromNode);
+                    return false;
+                }
+                memberStartIndex = 1;
+                return true;
+            }
+
+            if (root == "base")
+                return false;
+
+            var asStructType = ResolveStruct (root);
+            if (asStructType != null) {
+                type = asStructType;
+                memberStartIndex = 1;
+                if (path.Count > 1 && path [1] == "static") {
+                    memberStartIndex = 2;
+                } else if (path.Count > 1 && asStructType.FindField (path [1]) == null) {
+                    // Type.Instance.field — instance is a global/temp of a compatible struct type
+                    var instDecl = ResolveVariableDeclaration (path [1], fromNode);
+                    if (instDecl != null && instDecl.structTypeName != null) {
+                        var instType = ResolveStruct (instDecl.structTypeName);
+                        if (instType != null)
+                            type = instType;
+                        memberStartIndex = 2;
+                    }
+                }
+                return true;
+            }
+
+            var varDecl = ResolveVariableDeclaration (root, fromNode);
+            if (varDecl != null && varDecl.structTypeName != null) {
+                type = ResolveStruct (varDecl.structTypeName);
+                if (type == null) {
+                    if (reportErrors)
+                        fromNode.Error ("Unknown struct type '" + varDecl.structTypeName + "' for '" + root + "'", fromNode);
+                    return false;
+                }
+                memberStartIndex = 1;
+                return true;
+            }
+
+            return false;
+        }
+
+        public void ValidateStructFieldAccess (IList<string> path, Parsed.Object fromNode)
+        {
+            StructDeclaration type;
+            int start;
+            if (!TryResolveStructPathContext (path, fromNode, out type, out start)) {
+                if (path != null && path.Count >= 2 && path [0] != "base") {
+                    var varDecl = ResolveVariableDeclaration (path [0], fromNode);
+                    if (varDecl != null && varDecl.structTypeName == null)
+                        fromNode.Error ("Cannot access '" + path [1] + "' on '" + path [0] + "' because it is not a struct-typed variable", fromNode);
+                }
+                return;
+            }
+
+            if (start >= path.Count) {
+                // Bare type / self / Type.static with no field — ok as instance reference elsewhere
+                return;
+            }
+
+            var typeCursor = type;
+            for (int i = start; i < path.Count; i++) {
+                var field = typeCursor.FindField (path [i]);
+                if (field == null) {
+                    fromNode.Error ("Struct '" + typeCursor.name + "' has no field named '" + path [i] + "'", fromNode);
+                    return;
+                }
+                if (i < path.Count - 1) {
+                    if (string.IsNullOrEmpty (field.structTypeName)) {
+                        fromNode.Error ("Cannot access members through '" + path [i] + "' because it is not a struct-typed field", fromNode);
+                        return;
+                    }
+                    var next = ResolveStruct (field.structTypeName);
+                    if (next == null) {
+                        fromNode.Error ("Unknown struct type '" + field.structTypeName + "' on field '" + path [i] + "'", fromNode);
+                        return;
+                    }
+                    typeCursor = next;
+                }
+            }
+        }
+
+        public void ValidateStructMethodCall (IList<string> pathIncludingMethod, Parsed.Object fromNode)
+        {
+            if (pathIncludingMethod == null || pathIncludingMethod.Count < 2)
+                return;
+
+            string methodName = pathIncludingMethod [pathIncludingMethod.Count - 1];
+
+            if (pathIncludingMethod [0] == "base") {
+                // Validated separately in FunctionCall
+                return;
+            }
+
+            StructDeclaration type;
+            int start;
+            if (!TryResolveStructPathContext (pathIncludingMethod, fromNode, out type, out start))
+                return;
+
+            // Intermediate fields before the method name
+            int methodIndex = pathIncludingMethod.Count - 1;
+            if (start > methodIndex) {
+                fromNode.Error ("Missing method name in struct call", fromNode);
+                return;
+            }
+
+            var typeCursor = type;
+            for (int i = start; i < methodIndex; i++) {
+                var field = typeCursor.FindField (pathIncludingMethod [i]);
+                if (field == null) {
+                    fromNode.Error ("Struct '" + typeCursor.name + "' has no field named '" + pathIncludingMethod [i] + "'", fromNode);
+                    return;
+                }
+                if (string.IsNullOrEmpty (field.structTypeName)) {
+                    fromNode.Error ("Cannot call methods through '" + pathIncludingMethod [i] + "' because it is not a struct-typed field", fromNode);
+                    return;
+                }
+                var next = ResolveStruct (field.structTypeName);
+                if (next == null) {
+                    fromNode.Error ("Unknown struct type '" + field.structTypeName + "' on field '" + pathIncludingMethod [i] + "'", fromNode);
+                    return;
+                }
+                typeCursor = next;
+            }
+
+            if (!typeCursor.HasMethod (methodName)) {
+                fromNode.Error ("Struct '" + typeCursor.name + "' has no method named '" + methodName + "'", fromNode);
+            }
+        }
+
         public void DontFlattenContainer (Runtime.Container container)
         {
             _dontFlattenContainers.Add (container);

@@ -863,7 +863,7 @@ Oh my goodness me!
 
 === struct Party ===
 VAR leader: Character = Character
-REFVAR scout: Character = none
+REFVAR scout: Oswald = none
 
 VAR Oswald: Oswald
 VAR party: Party = Party
