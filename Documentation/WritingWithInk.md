@@ -38,7 +38,14 @@
 	 * [6) Multi-list Lists](#6-multi-list-lists)
 	 * [7) Long example: crime scene](#7-long-example-crime-scene)
 	 * [8) Summary](#8-summary)
-   * [Part 6: International character support in identifiers](#part-6-international-character-support-in-identifiers)
+   * [Part 6: Structs](#part-6-structs)
+     * [1) Defining a struct](#1-defining-a-struct)
+     * [2) Instances](#2-instances)
+     * [3) Fields and methods](#3-fields-and-methods)
+     * [4) Inheritance](#4-inheritance)
+     * [5) References (REFVAR)](#5-references-refvar)
+     * [6) Summary](#6-summary)
+   * [Part 7: International character support in identifiers](#part-7-international-character-support-in-identifiers)
 </details>
 
 ## Introduction
@@ -3395,7 +3402,197 @@ Example:
 
 
 
-# Part 6: International character support in identifiers
+# Part 6: Structs
+
+Lists are excellent for tracking discrete story states. **Structs** are for *entities* — characters, items, factions — that need several fields and shared behaviour in one place.
+
+A struct groups fields and methods. You declare typed variables that hold instances, read and write fields with dotted paths, and call methods on those instances. Inheritance lets subtypes override defaults and methods.
+
+Structs are not narrative entry points: you cannot `-> SomeStruct` the way you divert to a knot. Methods are functions (they may print text and `~ return`), not stitches you weave into.
+
+## 1) Defining a struct
+
+Use knot-shaped syntax with the `struct` keyword. Put **fields before methods**. Methods are function stitches:
+
+	=== struct Character ===
+	VAR name = "anonymous"
+	VAR nerves = 1
+	= function ReactFurious() =
+	The heck you are doing?
+	~ return
+
+Rules of thumb:
+
+- Field and method names must be unique within the struct (including inherited members).
+- `self`, `base`, and `static` are reserved and cannot be field or method names.
+- `EXTERNAL` lines are allowed inside a struct (same idea as for ordinary functions); a matching function stitch can act as a fallback when the game has not bound the external.
+
+Close a struct with a boundary of **three or more** `=` characters (`===`, `====`, …) before any top-level content that would otherwise look like more fields (especially typed globals). A following knot or struct title (`=== start ===`, `=== struct Other ===`) also ends the body. Without that marker, a `VAR` after the fields is treated as another field:
+
+	=== struct Character ===
+	VAR name = "anonymous"
+	= function Speak() =
+	Hello!
+	~ return
+	===
+	VAR hero: Character
+
+## 2) Instances
+
+### Default instance
+
+Every struct type has an implicit **default instance**. Outside of a struct body, the bare type name refers to that default:
+
+	{Character.name}
+	~ Character.ReactFurious()
+
+Field initializers in the struct body set the default instance’s starting values. New instances copy those defaults unless you give another initializer.
+
+### Typed globals and temps
+
+	// Copy from Character's default instance
+	VAR Oswald: Character
+
+	// Copy from another instance (deep copy of embedded fields)
+	VAR Clone: Character = Oswald
+
+	~ Oswald.name = "Flinn Oswald"
+
+	~ temp guest: Character = Oswald
+	~ guest.name = "Visitor"
+	// Oswald.name is still "Flinn Oswald"
+
+Assignment of a whole struct value deep-copies embedded (`VAR`) fields. See [References (REFVAR)](#5-references-refvar) for reference fields.
+
+Temps work the same way as globals for field access and method calls, but they are not saved with story state and are not visible to the game engine through `variablesState`.
+
+### Function parameters
+
+	=== function Greet(who: Character) ===
+	{who.name} waves.
+	~ return
+
+	=== function Rename(ref who: Character, newName) ===
+	~ who.name = newName
+	~ return
+
+Without `ref`, the callee receives a deep copy. With `ref`, the callee mutates the caller’s instance (same as ordinary ink `ref` parameters).
+
+## 3) Fields and methods
+
+### Reading and writing fields
+
+	VAR Oswald: Character
+	~ Oswald.name = "Flinn"
+	{Oswald.name}
+	~ Oswald.nerves++
+
+Nested struct fields use the same dotted paths. Assigning into an embedded struct field replaces that nested value (deep copy).
+
+### Calling methods
+
+	~ Oswald.ReactFurious()
+
+Methods receive an implicit `ref self` as their first parameter. Access to fields and sibling methods on that instance is **always explicit** (Python-style): bare names resolve as ordinary globals / temps / functions, not as members.
+
+	=== struct Character ===
+	VAR name = "anonymous"
+	= function Introduce() =
+	My name is {self.name}.
+	~ self.OtherMethod()
+	~ return
+	= function OtherMethod() =
+	~ return
+
+You can also call a method on the default instance: `~ Character.Introduce()`.
+
+### Calling a base implementation
+
+When a subtype overrides a method, use `base` to call the inherited version:
+
+	=== struct Oswald: Character ===
+	VAR name = "Flinn Oswald"
+	= function ReactFurious() =
+	~ base.ReactFurious()
+	Oh my goodness me!
+	~ return
+
+`base.SomeMethod(...)` only works inside a method that overrides `SomeMethod`.
+
+## 4) Inheritance
+
+A struct can list one or more base types after a colon:
+
+	=== struct ISuspect ===
+	= function IsSuspect() =
+	~ return true
+
+	=== struct Oswald: Character, ISuspect ===
+	VAR name = "Flinn Oswald"
+
+- Redeclared fields override the inherited **default value**.
+- Redeclared methods override the inherited implementation (virtual dispatch uses the instance’s concrete type).
+- Multiple inheritance is allowed; methods and fields are merged in declaration order of the bases, with the child’s own members winning.
+
+A variable typed as a base can hold a subtype instance. Method calls on it are still virtual:
+
+	VAR someone: Character = Oswald
+	~ someone.ReactFurious()
+	// runs Oswald's override if Oswald redefined it
+
+### Runtime type checks
+
+Use `is` / `isnt` to test an instance against a struct type (including bases / mixins). The right-hand side is usually a bare type name (the default instance):
+
+	{Oswald is Character}
+	{Oswald is ISuspect}
+	{someone isnt Oswald}
+
+`REFVAR` targets are followed automatically, same as field access and method calls.
+
+## 5) References (REFVAR)
+
+Ordinary struct fields and typed `VAR`s are **values**: assignment and parameter passing (without `ref`) deep-copy embedded data.
+
+`REFVAR` stores a **reference** to another global instance (or `none`), not a nested copy. It can be a field inside a struct, or a top-level global:
+
+	=== struct Party ===
+	VAR leader: Character = Character
+	REFVAR scout: Character = none
+
+	VAR Oswald: Oswald
+	VAR party: Party
+	REFVAR active: Character = none
+
+	~ party.scout = Oswald
+	~ active = Oswald
+	~ party.scout.ReactFurious()
+	~ active.ReactFurious()
+	{party.scout.name}
+	{active.name}
+
+Rebinding `party.scout` or `active` changes which global is referred to; it does not copy Oswald. Clearing a reference:
+
+	~ party.scout = none
+	~ active = none
+
+`REFVAR` targets must be globals the engine (and save system) can resolve by name. Prefer `REFVAR` when several structs should share the same live instance.
+
+## 6) Summary
+
+- Define types with `=== struct Name ===` (optional `: Base1, Base2`).
+- Fields and globals: `VAR` / `REFVAR` first; then `= function Method() =` methods.
+- End the struct body with `===` (3+ equals) before top-level globals, or continue with another knot/struct title.
+- Instantiate with `VAR x: Type` or `temp x: Type` (optional `= initializer`).
+- Inside methods use `self.field` / `self.Method()` (and `base.Method()` when overriding); bare names are globals, not members.
+- Value fields/`VAR`s copy; `REFVAR` fields and globals rebind to globals (or `none`).
+- `is` / `isnt` test runtime type against a struct type (including inheritance).
+- Structs are not divert targets.
+
+For reading and writing struct state from game code, see [Working with structs](RunningYourInk.md#working-with-structs) in *Running your ink*.
+
+
+# Part 7: International character support in identifiers
 
 By default, ink has no limitations on the use of non-ASCII characters inside the story content. However, a limitation currently exsits
 on the characters that can be used for names of constants, variables, stictches, diverts and other named flow elements (a.k.a. *identifiers*).
