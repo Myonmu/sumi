@@ -880,6 +880,19 @@ VAR party: Party = Party
 
 ---
 
+## Runtime type checks (`is` / `isnt`)
+
+```ink
+{ Oswald is Character }
+{ someone isnt Oswald }
+{ party.scout is ISuspect }
+```
+
+- Binary operators with required whitespace (same registration style as `has` / `hasnt`).
+- LHS is a struct instance (value, pointer, or `REFVAR`); RHS supplies a type name via its concrete `^t` (bare type name → default instance).
+- True when LHS’s concrete type equals RHS’s type or inherits from it (walk `structDefs[].bases`).
+- `isnt` is the negation. Non-struct / `none` LHS is false for `is`.
+
 ## Non-goals (v1)
 
 - Parent-disambiguated `base<Type>.Method`.

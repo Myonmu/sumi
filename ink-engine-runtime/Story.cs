@@ -1780,12 +1780,88 @@ namespace Ink.Runtime
             else if (contentObj is NativeFunctionCall) {
                 var func = (NativeFunctionCall)contentObj;
                 var funcParams = state.PopEvaluationStack (func.numberOfParameters);
+
+                // Struct polymorphism: needs structDefs for base walks
+                if (func.name == NativeFunctionCall.Is || func.name == NativeFunctionCall.Isnt) {
+                    state.PushEvaluationStack (CallStructIsOperation (func.name, funcParams));
+                    return true;
+                }
+
                 var result = func.Call (funcParams);
                 state.PushEvaluationStack (result);
                 return true;
             } 
 
             // No control content, must be ordinary content
+            return false;
+        }
+
+        Runtime.Object CallStructIsOperation (string opName, List<Runtime.Object> parameters)
+        {
+            if (parameters == null || parameters.Count != 2)
+                throw new System.Exception ("Unexpected number of parameters to '" + opName + "'");
+
+            var leftInstance = ResolveStructInstance (parameters [0]);
+            string queryTypeName = StructTypeNameForIsCheck (parameters [1]);
+
+            bool matches = leftInstance != null
+                && queryTypeName != null
+                && StructIsA (leftInstance.typeName, queryTypeName);
+
+            if (opName == NativeFunctionCall.Isnt)
+                matches = !matches;
+
+            return new BoolValue (matches);
+        }
+
+        string StructTypeNameForIsCheck (Runtime.Object obj)
+        {
+            var ptr = obj as VariablePointerValue;
+            if (ptr != null)
+                obj = state.variablesState.ValueAtVariablePointer (ptr);
+
+            var structVal = obj as StructValue;
+            if (structVal != null && structVal.value != null)
+                return structVal.value.typeName;
+
+            // Allow a type name string if ever pushed explicitly
+            var strVal = obj as StringValue;
+            if (strVal != null)
+                return strVal.value;
+
+            return null;
+        }
+
+        bool StructIsA (string concreteTypeName, string queryTypeName)
+        {
+            if (concreteTypeName == null || queryTypeName == null)
+                return false;
+            if (concreteTypeName == queryTypeName)
+                return true;
+
+            if (_structDefinitions == null)
+                return false;
+
+            var visited = new HashSet<string> ();
+            return StructIsARecursive (concreteTypeName, queryTypeName, visited);
+        }
+
+        bool StructIsARecursive (string concreteTypeName, string queryTypeName, HashSet<string> visited)
+        {
+            if (!visited.Add (concreteTypeName))
+                return false;
+
+            var def = _structDefinitions.GetDefinition (concreteTypeName);
+            if (def == null || def.bases == null)
+                return false;
+
+            foreach (var baseName in def.bases) {
+                if (baseName == queryTypeName)
+                    return true;
+                if (StructIsARecursive (baseName, queryTypeName, visited))
+                    return true;
+            }
+
             return false;
         }
 

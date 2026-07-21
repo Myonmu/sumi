@@ -722,6 +722,8 @@ namespace Ink.Parsed
             case "base":
             case "static":
             case "none":
+            case "is":
+            case "isnt":
                 return true;
             }
 

@@ -38,6 +38,9 @@ namespace Ink.Runtime
         public const string Hasnt    = "!?";
         public const string Intersect = "^";
 
+        public const string Is       = "is";
+        public const string Isnt     = "isnt";
+
         public const string ListMin   = "LIST_MIN";
         public const string ListMax   = "LIST_MAX";
         public const string All       = "LIST_ALL";
@@ -428,6 +431,17 @@ namespace Ink.Runtime
                 };
                 AddOpToNativeFunc (Equal, 2, ValueType.DivertTarget, divertTargetsEqual);
                 AddOpToNativeFunc (NotEquals, 2, ValueType.DivertTarget, divertTargetsNotEqual);
+
+                // Struct polymorphism checks are special-cased in Story (need structDefs).
+                // Placeholders so CallExistsWithName / JSON round-trip work.
+                BinaryOp<StructObject> structIsPlaceholder = (a, b) => {
+                    throw new System.Exception ("'is' should be handled by Story");
+                };
+                BinaryOp<StructObject> structIsntPlaceholder = (a, b) => {
+                    throw new System.Exception ("'isnt' should be handled by Story");
+                };
+                AddOpToNativeFunc (Is, 2, ValueType.Struct, structIsPlaceholder);
+                AddOpToNativeFunc (Isnt, 2, ValueType.Struct, structIsntPlaceholder);
 
             }
         }

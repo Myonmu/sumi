@@ -488,6 +488,10 @@ namespace Ink
             RegisterBinaryOperator ("hasnt", precedence: 3, requireWhitespace: true);
             RegisterBinaryOperator ("^", precedence: 3);
 
+            // Struct polymorphism: instance is Type / instance isnt Type
+            RegisterBinaryOperator ("is", precedence: 3, requireWhitespace: true);
+            RegisterBinaryOperator ("isnt", precedence: 3, requireWhitespace: true);
+
 			RegisterBinaryOperator ("+", precedence:4);
 			RegisterBinaryOperator ("-", precedence:5);
 			RegisterBinaryOperator ("*", precedence:6);
