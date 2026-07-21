@@ -35,12 +35,66 @@ namespace Ink
 
 			Expect(EndOfLine, "end of line after knot name definition", recoveryRule: SkipToNextLine);
 
-			ParseRule innerKnotStatements = () => StatementsAtLevel (StatementLevel.Knot);
-
-            var content = Expect (innerKnotStatements, "at least one line within the knot", recoveryRule: KnotStitchNoContentRecoveryRule) as List<Parsed.Object>;
+            List<Parsed.Object> content;
+            if (flowDecl.isFunction) {
+                // Functions may optionally close with a bare === so following
+                // top-level content is not swallowed into the function body.
+                content = ParseFunctionBodyContent ();
+            } else {
+                ParseRule innerKnotStatements = () => StatementsAtLevel (StatementLevel.Knot);
+                content = Expect (innerKnotStatements, "at least one line within the knot", recoveryRule: KnotStitchNoContentRecoveryRule) as List<Parsed.Object>;
+            }
 
             return new Knot (knotDecl.name, content, flowDecl.arguments, flowDecl.isFunction);
 		}
+
+        /// <summary>
+        /// Function body: same statements as a knot, but terminates at the next
+        /// knot/struct/function header or an optional bare <c>===</c> end marker
+        /// (same optional closer as structs).
+        /// </summary>
+        protected List<Parsed.Object> ParseFunctionBodyContent ()
+        {
+            var content = Interleave<Parsed.Object> (
+                Optional (MultilineWhitespace),
+                () => StatementAtLevel (StatementLevel.Knot),
+                untilTerminator: FunctionBodyBreak);
+
+            // Peek-based terminator leaves a bare === unconsumed — eat it now.
+            // Named headers (=== next / == next) are left for the outer parser.
+            ParseStructEndBoundary ();
+
+            if (content == null || content.Count == 0)
+                content = new List<Parsed.Object> { new Parsed.Text ("") };
+
+            return content;
+        }
+
+        /// <summary>
+        /// Peek terminator for function bodies: next flow header (<c>== name</c> /
+        /// <c>=== function|struct|name</c>) or bare <c>===</c> end marker.
+        /// Does not report "expected name" errors for bare <c>===</c>.
+        /// </summary>
+        protected object FunctionBodyBreak ()
+        {
+            Whitespace ();
+
+            var equals = ParseCharactersFromString ("=");
+            if (equals == null || equals.Length < 2)
+                return null;
+
+            Whitespace ();
+
+            // Next knot / function / struct
+            if (Parse (IdentifierWithMetadata) != null)
+                return ParseSuccess;
+
+            // Bare === (or ====…) — optional function end marker (structs use 3+)
+            if (equals.Length >= 3)
+                return ParseSuccess;
+
+            return null;
+        }
 
         protected StructDeclaration StructDefinition()
         {
@@ -110,8 +164,9 @@ namespace Ink
         }
 
         /// <summary>
-        /// True when a struct-ending <c>===</c> (3+ equals) was found.
-        /// Bare <c>===</c> is consumed; a following knot/struct name is left unconsumed.
+        /// True when a flow-ending <c>===</c> (3+ equals) was found.
+        /// Bare <c>===</c> is consumed; a following knot/struct/function name is left unconsumed.
+        /// Used by structs and by optionally-closed functions.
         /// </summary>
         protected bool ParseStructEndBoundary ()
         {
@@ -126,14 +181,14 @@ namespace Ink
 
             Whitespace ();
 
-            // Next knot/struct: === name / === function name / === struct name
+            // Next knot/struct/function: === name / === function name / === struct name
             if (Parse (IdentifierWithMetadata) != null) {
                 FailRule (ruleId); // leave for outer parser
                 return true;
             }
 
             // Bare === (or ====…) end marker — consume the rest of the line
-            Expect (EndOfLine, "end of line after struct end marker '==='", recoveryRule: SkipToNextLine);
+            Expect (EndOfLine, "end of line after end marker '==='", recoveryRule: SkipToNextLine);
             SucceedRule (ruleId);
             return true;
         }

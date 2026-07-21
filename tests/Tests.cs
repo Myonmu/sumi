@@ -1003,6 +1003,43 @@ Hello world
         }
 
         [Test()]
+        public void TestFunctionOptionalEqualsEndAllowsFollowingContent()
+        {
+            // Like structs, a bare === optionally closes a function so following
+            // top-level content is not swallowed into the function body.
+            var story = CompileString(@"
+This content is printed
+
+=== function Announce(who)
+{who} is announced.
+~ return
+===
+
+This content is also printed
+-> END
+");
+            Assert.AreEqual("This content is printed\nThis content is also printed\n", story.ContinueMaximally());
+        }
+
+        [Test()]
+        public void TestFunctionWithoutEqualsEndStillSwallowsFollowingContent()
+        {
+            // Without the optional closer, content after a function remains part of
+            // the function (original ink behaviour) and is not run as top-level text.
+            // (No -> END here: it would be swallowed into the function and error.)
+            var story = CompileString(@"
+This content is printed
+
+=== function Announce(who)
+{who} is announced.
+~ return
+
+This content is not printed
+");
+            Assert.AreEqual("This content is printed\n", story.ContinueMaximally());
+        }
+
+        [Test()]
         public void TestDisallowEmptyDiverts()
         {
             CompileStringWithoutRuntime ("->", testingErrors: true);
