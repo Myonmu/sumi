@@ -57,42 +57,37 @@ namespace Ink
 
         /// <summary>
         /// Struct bodies accept fields, function stitches, and EXTERNAL lines.
-        /// A blank line followed by VAR/REFVAR ends the struct so subsequent
-        /// typed globals (e.g. VAR Oswald: Oswald) are parsed at top level.
+        /// The body ends at a boundary of 3+ continuous '=' characters: either a bare
+        /// <c>===</c> end marker (consumed), or the start of the next knot/struct
+        /// (left for the outer parser). Fields must appear before methods; after the
+        /// first method, VAR/EXTERNAL lines are left for top-level parsing.
         /// </summary>
         protected List<Parsed.Object> ParseStructBodyContent ()
         {
             var content = new List<Parsed.Object> ();
-            bool blankLinePending = false;
+            bool seenMethod = false;
 
             while (true) {
-                var newlineCount = 0;
-                while (ParseNewline () != null)
-                    newlineCount++;
-                // Previous Line() already consumed its trailing newline, so a single
-                // extra newline here means a blank line before the next statement.
-                if (newlineCount > 0)
-                    blankLinePending = true;
-
+                while (ParseNewline () != null) { }
                 Whitespace ();
 
-                // Next knot/struct ends the body
-                var ruleId = BeginRule ();
-                if (Parse (KnotDeclaration) != null) {
-                    FailRule (ruleId); // don't consume — leave for outer parser
+                if (ParseStructEndBoundary ())
                     break;
-                }
-                FailRule (ruleId);
 
-                // Blank line then VAR → hoist to top-level (global instances)
-                if (blankLinePending) {
-                    ruleId = BeginRule ();
-                    var peekedVar = ParseObject (VariableDeclaration);
-                    if (peekedVar != null) {
-                        FailRule (ruleId);
-                        break;
+                // Fields before methods: once a method is seen, further VAR/EXTERNAL
+                // belong at top level (after an explicit === if needed for clarity).
+                if (!seenMethod) {
+                    var ext = ParseObject (Line (ExternalDeclaration)) as Parsed.Object;
+                    if (ext != null) {
+                        content.Add (ext);
+                        continue;
                     }
-                    FailRule (ruleId);
+
+                    var varDecl = ParseObject (Line (VariableDeclaration)) as Parsed.Object;
+                    if (varDecl != null) {
+                        content.Add (varDecl);
+                        continue;
+                    }
                 }
 
                 var stitchDecl = Parse (StitchDeclaration);
@@ -101,27 +96,10 @@ namespace Ink
                     var stitchContent = ParseStructMethodBodyContent ();
                     var stitch = new Stitch (stitchDecl.name, stitchContent, stitchDecl.arguments, stitchDecl.isFunction);
                     content.Add (stitch);
-                    // After a method, further VARs are treated as top-level globals
-                    // (fields must be declared before methods).
-                    blankLinePending = true;
+                    seenMethod = true;
                     continue;
                 }
 
-                var ext = ParseObject (Line (ExternalDeclaration)) as Parsed.Object;
-                if (ext != null) {
-                    content.Add (ext);
-                    blankLinePending = false;
-                    continue;
-                }
-
-                var varDecl = ParseObject (Line (VariableDeclaration)) as Parsed.Object;
-                if (varDecl != null) {
-                    content.Add (varDecl);
-                    blankLinePending = false;
-                    continue;
-                }
-
-                // Skip pure whitespace / comments lines; otherwise stop
                 if (ParseObject (Line (AuthorWarning)) != null)
                     continue;
 
@@ -132,7 +110,50 @@ namespace Ink
         }
 
         /// <summary>
-        /// Method bodies: text and logic lines only, ending at blank line / next stitch / knot / VAR.
+        /// True when a struct-ending <c>===</c> (3+ equals) was found.
+        /// Bare <c>===</c> is consumed; a following knot/struct name is left unconsumed.
+        /// </summary>
+        protected bool ParseStructEndBoundary ()
+        {
+            var ruleId = BeginRule ();
+
+            Whitespace ();
+            var equals = ParseCharactersFromString ("=");
+            if (equals == null || equals.Length < 3) {
+                FailRule (ruleId);
+                return false;
+            }
+
+            Whitespace ();
+
+            // Next knot/struct: === name / === function name / === struct name
+            if (Parse (IdentifierWithMetadata) != null) {
+                FailRule (ruleId); // leave for outer parser
+                return true;
+            }
+
+            // Bare === (or ====…) end marker — consume the rest of the line
+            Expect (EndOfLine, "end of line after struct end marker '==='", recoveryRule: SkipToNextLine);
+            SucceedRule (ruleId);
+            return true;
+        }
+
+        /// <summary>
+        /// Peek for 3+ continuous '=' without recording knot-name errors.
+        /// </summary>
+        protected bool PeekStructEndBoundary ()
+        {
+            var ruleId = BeginRule ();
+            Whitespace ();
+            var equals = ParseCharactersFromString ("=");
+            bool found = equals != null && equals.Length >= 3;
+            FailRule (ruleId);
+            return found;
+        }
+
+        /// <summary>
+        /// Method bodies: text and logic lines only, ending at blank line / next stitch /
+        /// knot/struct boundary (<c>===</c>) / VAR.
         /// </summary>
         protected List<Parsed.Object> ParseStructMethodBodyContent ()
         {
@@ -153,7 +174,7 @@ namespace Ink
                     // Peek whether this newline starts a new struct-level construct
                     ParseCharactersFromString (" \t");
                     var peek = BeginRule ();
-                    bool stop = Parse (KnotDeclaration) != null
+                    bool stop = PeekStructEndBoundary ()
                         || Parse (StitchDeclaration) != null
                         || ParseObject (VariableDeclaration) != null;
                     FailRule (peek);
@@ -169,7 +190,7 @@ namespace Ink
                 ParseCharactersFromString (" \t");
 
                 var endPeek = BeginRule ();
-                bool atEnd = Parse (KnotDeclaration) != null
+                bool atEnd = PeekStructEndBoundary ()
                     || Parse (StitchDeclaration) != null;
                 FailRule (endPeek);
                 if (atEnd)

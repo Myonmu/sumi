@@ -4334,12 +4334,71 @@ VAR Oswald: Oswald
         }
 
         [Test()]
+        public void TestStructsExplicitSelfForFieldsAndMethods()
+        {
+            // Bare names resolve as globals; members require self.
+            var story = CompileString(@"
+VAR name = ""global-name""
+=== function Helper ===
+helper
+~ return
+
+=== struct Character ===
+VAR name = ""anonymous""
+= function Greet() =
+{name}
+{self.name}
+~ Helper()
+~ self.Helper()
+~ return
+= function Helper() =
+member-helper
+~ return
+===
+VAR Oswald: Character
+
+-> start
+=== start ===
+~ Oswald.name = ""Flinn""
+~ Oswald.Greet()
+-> END
+");
+            Assert.AreEqual("global-name\nFlinn\nhelper\nmember-helper\n", story.ContinueMaximally());
+        }
+
+        [Test()]
+        public void TestStructsCommentsInsideBodyDoNotEndStruct()
+        {
+            // In-struct // comments (which become blank lines) must not end the struct
+            // early. Close with === (or the next knot/struct title) before top-level flow.
+            var story = CompileString(@"
+-> start
+
+// define a struct with the struct keyword
+=== struct Character ===
+// structs may contain fields
+VAR name = ""Anonymous""
+// and functions
+= function Greet()
+Hello!
+~ return
+===
+
+=== start ===
+{Character.name}
+~ Character.Greet()
+-> END
+");
+            Assert.AreEqual("Anonymous\nHello!\n", story.ContinueMaximally());
+        }
+
+        [Test()]
         public void TestStructsTempCopyAndFieldAssign()
         {
             var story = CompileString(@"
 === struct Character ===
 VAR name = ""anonymous""
-
+===
 VAR Oswald: Character
 
 -> start
