@@ -79,8 +79,12 @@ namespace Ink
             Whitespace ();
 
             var id = Parse (Identifier);
-            if (id != "VAR")
+            bool isRefVar = false;
+            if (id == "REFVAR") {
+                isRefVar = true;
+            } else if (id != "VAR") {
                 return null;
+            }
 
             Whitespace ();
 
@@ -88,35 +92,45 @@ namespace Ink
 
             Whitespace ();
 
-            Expect (String ("="), "the '=' for an assignment of a value, e.g. '= 5' (initial values are mandatory)");
-
-            Whitespace ();
-
-            var definition = Expect (Expression, "initial value for ");
-
-            var expr = definition as Parsed.Expression;
-
-            if (expr) {
-                if (!(expr is Number || expr is StringExpression || expr is DivertTarget || expr is VariableReference || expr is List)) {
-                    Error ("initial value for a variable must be a number, constant, list or divert target");
-                }
-
-                if (Parse (ListElementDefinitionSeparator) != null)
-                    Error ("Unexpected ','. If you're trying to declare a new list, use the LIST keyword, not VAR");
-
-                // Ensure string expressions are simple
-                else if (expr is StringExpression) {
-                    var strExpr = expr as StringExpression;
-                    if (!strExpr.isSingleString)
-                        Error ("Constant strings cannot contain any logic.");
-                }
-
-                var result = new VariableAssignment (varName, expr);
-                result.isGlobalDeclaration = true;
-                return result;
+            // Optional type annotation: : TypeName
+            string structTypeName = null;
+            if (ParseString (":") != null) {
+                Whitespace ();
+                var typeId = Expect (IdentifierWithMetadata, "struct type name") as Identifier;
+                structTypeName = typeId?.name;
+                Whitespace ();
             }
 
-            return null;
+            Expression expr = null;
+            if (ParseString ("=") != null) {
+                Whitespace ();
+                var definition = Expect (Expression, "initial value for ");
+                expr = definition as Parsed.Expression;
+
+                if (expr && structTypeName == null) {
+                    if (!(expr is Number || expr is StringExpression || expr is DivertTarget || expr is VariableReference || expr is List)) {
+                        Error ("initial value for a variable must be a number, constant, list or divert target");
+                    }
+
+                    if (Parse (ListElementDefinitionSeparator) != null)
+                        Error ("Unexpected ','. If you're trying to declare a new list, use the LIST keyword, not VAR");
+
+                    // Ensure string expressions are simple
+                    else if (expr is StringExpression) {
+                        var strExpr = expr as StringExpression;
+                        if (!strExpr.isSingleString)
+                            Error ("Constant strings cannot contain any logic.");
+                    }
+                }
+            } else if (structTypeName == null) {
+                Expect (String ("="), "the '=' for an assignment of a value, e.g. '= 5' (initial values are mandatory)");
+            }
+
+            var result = new VariableAssignment (varName, expr);
+            result.isGlobalDeclaration = true;
+            result.isRefVar = isRefVar;
+            result.structTypeName = structTypeName;
+            return result;
         }
 
         protected Parsed.VariableAssignment ListDeclaration ()

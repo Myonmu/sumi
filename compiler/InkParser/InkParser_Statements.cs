@@ -77,7 +77,11 @@ namespace Ink
 
                 // Knots can only be parsed at Top/Global scope
                 if (level >= StatementLevel.Top)
-                    rulesAtLevel.Add (KnotDefinition);
+                {
+	                rulesAtLevel.Add (KnotDefinition);
+	                rulesAtLevel.Add(StructDefinition);
+                }
+                    
 
                 rulesAtLevel.Add(Line(Choice));
 

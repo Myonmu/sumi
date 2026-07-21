@@ -14,11 +14,16 @@ namespace Ink
 
             Whitespace ();
 
+            // Support dotted LHS for field assignment: ~ Oswald.name = x
+            List<Identifier> pathIds = null;
             Identifier varIdentifier = null;
             if (isNewDeclaration) {
                 varIdentifier = (Identifier)Expect (IdentifierWithMetadata, "variable name");
             } else {
-                varIdentifier = Parse(IdentifierWithMetadata);
+                pathIds = Parse (DotAccessCall);
+                if (pathIds == null || pathIds.Count == 0)
+                    return null;
+                varIdentifier = pathIds [0];
             }
 
             if (varIdentifier == null) {
@@ -27,13 +32,29 @@ namespace Ink
 
             Whitespace();
 
+            // Optional type for temp: ~ temp guest: Character [= expr]
+            string structTypeName = null;
+            if (isNewDeclaration && ParseString (":") != null) {
+                Whitespace ();
+                var typeId = Expect (IdentifierWithMetadata, "struct type name") as Identifier;
+                structTypeName = typeId?.name;
+                Whitespace ();
+            }
+
             // += -=
             bool isIncrement = ParseString ("+") != null;
             bool isDecrement = ParseString ("-") != null;
             if (isIncrement && isDecrement) Error ("Unexpected sequence '+-'");
 
-            if (ParseString ("=") == null) {
-                // Definitely in an assignment expression?
+            bool hasAssign = ParseString ("=") != null;
+            if (!hasAssign) {
+                // temp x: Type without initializer is allowed
+                if (isNewDeclaration && structTypeName != null) {
+                    var typedTemp = new VariableAssignment (varIdentifier, (Expression)null);
+                    typedTemp.isNewTemporaryDeclaration = true;
+                    typedTemp.structTypeName = structTypeName;
+                    return typedTemp;
+                }
                 if (isNewDeclaration) Error ("Expected '='");
                 return null;
             }
@@ -43,9 +64,13 @@ namespace Ink
             if (isIncrement || isDecrement) {
                 var result = new IncDecExpression (varIdentifier, assignedExpression, isIncrement);
                 return result;
+            } else if (pathIds != null && pathIds.Count > 1) {
+                // Field assignment
+                return new StructFieldAssignment (pathIds, assignedExpression);
             } else {
                 var result = new VariableAssignment (varIdentifier, assignedExpression);
                 result.isNewTemporaryDeclaration = isNewDeclaration;
+                result.structTypeName = structTypeName;
                 return result;
             }
         }
@@ -342,6 +367,15 @@ namespace Ink
 
         protected Expression ExpressionVariableName()
         {
+            var ruleId = BeginRule ();
+
+            // Allow 'none' as a REFVAR empty literal
+            var peekId = Parse (Identifier);
+            if (peekId == "none") {
+                return (Expression) SucceedRule (ruleId, new NoneLiteral ());
+            }
+            FailRule (ruleId);
+
             List<Identifier> path = Interleave<Identifier> (IdentifierWithMetadata, Exclude (Spaced (String ("."))));
 
             if (path == null || Story.IsReservedKeyword (path[0].name) )
