@@ -4371,6 +4371,45 @@ VAR Oswald: Oswald
         }
 
         [Test()]
+        public void TestStructsListFields()
+        {
+            var story = CompileString(@"
+LIST Mood = mad, happy, blue
+LIST Flags = (alpha), beta, (gamma)
+
+=== struct Character ===
+VAR mood = happy
+VAR flags = (alpha, gamma)
+VAR emptyFlags = Flags()
+===
+VAR hero: Character
+
+-> start
+=== start ===
+{hero.mood}
+{hero.flags}
+{LIST_COUNT(hero.emptyFlags)}
+~ hero.mood = mad
+{hero.mood}
+~ hero.flags += beta
+{hero.flags}
+~ hero.emptyFlags = ()
+~ hero.emptyFlags += alpha
+{hero.emptyFlags}
+-> END
+");
+            Assert.AreEqual(
+                "happy\nalpha, gamma\n0\nmad\nalpha, beta, gamma\nalpha\n",
+                story.ContinueMaximally());
+
+            var hero = story.variablesState.GetVariableWithName("hero") as Ink.Runtime.StructValue;
+            Assert.IsNotNull(hero);
+            var emptyFlags = hero.value.GetField("emptyFlags") as Ink.Runtime.ListValue;
+            Assert.IsNotNull(emptyFlags);
+            Assert.IsTrue(emptyFlags.value.Contains("alpha"));
+        }
+
+        [Test()]
         public void TestStructsExplicitSelfForFieldsAndMethods()
         {
             // Bare names resolve as globals; members require self.

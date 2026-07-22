@@ -473,9 +473,158 @@ namespace Ink.Parsed
                     continue;
                 }
 
-                // Struct-typed default referring to a type/instance — resolved at instance creation
+                // Struct-typed fields: instance defaults are created at runtime from the type
+                if (field.structTypeName != null) {
+                    field.runtimeDefault = null;
+                    continue;
+                }
+
+                var listDefault = TryMaterialiseListFieldDefault (field.defaultExpression);
+                if (listDefault != null) {
+                    field.runtimeDefault = listDefault;
+                    continue;
+                }
+
+                // Other defaults (e.g. non-constant expressions) — leave unset
                 field.runtimeDefault = null;
             }
+        }
+
+        /// <summary>
+        /// Bake a LIST value used as a struct field default (list item, list literal,
+        /// LIST variable initial value, or Type() empty list with origin).
+        /// </summary>
+        Runtime.ListValue TryMaterialiseListFieldDefault (Expression expr)
+        {
+            var listLit = expr as List;
+            if (listLit != null)
+                return BuildListValueFromLiteral (listLit);
+
+            var varRef = expr as VariableReference;
+            if (varRef != null && varRef.path != null)
+                return BuildListValueFromVariableReference (varRef);
+
+            var func = expr as FunctionCall;
+            if (func != null)
+                return BuildListValueFromListConstructor (func);
+
+            return null;
+        }
+
+        Runtime.ListValue BuildListValueFromLiteral (List listLit)
+        {
+            var runtimeRawList = new Runtime.InkList ();
+
+            if (listLit.itemIdentifierList != null) {
+                foreach (var itemIdentifier in listLit.itemIdentifierList) {
+                    var nameParts = itemIdentifier?.name.Split ('.');
+                    string listName = null;
+                    string listItemName = null;
+                    if (nameParts.Length > 1) {
+                        listName = nameParts [0];
+                        listItemName = nameParts [1];
+                    } else {
+                        listItemName = nameParts [0];
+                    }
+
+                    var listItem = ResolveListItem (listName, listItemName, listLit);
+                    if (listItem == null) {
+                        if (listName == null)
+                            listLit.Error ("Could not find list definition that contains item '" + itemIdentifier + "'");
+                        else
+                            listLit.Error ("Could not find list item " + itemIdentifier);
+                        continue;
+                    }
+
+                    if (listName == null)
+                        listName = ((ListDefinition)listItem.parent).identifier?.name;
+                    var item = new Runtime.InkListItem (listName, listItem.name);
+                    if (runtimeRawList.ContainsKey (item))
+                        listLit.Warning ("Duplicate of item '" + itemIdentifier + "' in list.");
+                    else
+                        runtimeRawList [item] = listItem.seriesValue;
+                }
+            }
+
+            return new Runtime.ListValue (runtimeRawList);
+        }
+
+        Runtime.ListValue BuildListValueFromVariableReference (VariableReference varRef)
+        {
+            if (varRef.path.Count == 1 || varRef.path.Count == 2) {
+                string listName = null;
+                string listItemName = null;
+                if (varRef.path.Count == 1) {
+                    listItemName = varRef.path [0];
+                } else {
+                    listName = varRef.path [0];
+                    listItemName = varRef.path [1];
+                }
+
+                var listItem = ResolveListItem (listName, listItemName, varRef);
+                if (listItem != null) {
+                    if (listName == null)
+                        listName = ((ListDefinition)listItem.parent).identifier?.name;
+                    var item = new Runtime.InkListItem (listName, listItem.name);
+                    return new Runtime.ListValue (item, listItem.seriesValue);
+                }
+            }
+
+            // Bare LIST name → that list variable's initial membership (parenthesized items)
+            if (varRef.path.Count == 1) {
+                var listDef = ResolveList (varRef.path [0]);
+                if (listDef != null)
+                    return BuildListValueFromListDefinitionInitial (listDef);
+            }
+
+            return null;
+        }
+
+        Runtime.ListValue BuildListValueFromListDefinitionInitial (ListDefinition listDef)
+        {
+            var runtimeRawList = new Runtime.InkList ();
+            var originName = listDef.identifier?.name;
+            if (originName != null)
+                runtimeRawList.SetInitialOriginName (originName);
+
+            foreach (var itemDef in listDef.itemDefinitions) {
+                if (!itemDef.inInitialList)
+                    continue;
+                var item = new Runtime.InkListItem (originName, itemDef.name);
+                runtimeRawList [item] = itemDef.seriesValue;
+            }
+
+            return new Runtime.ListValue (runtimeRawList);
+        }
+
+        Runtime.ListValue BuildListValueFromListConstructor (FunctionCall func)
+        {
+            var listDef = ResolveList (func.name);
+            if (listDef == null)
+                return null;
+
+            // Mood() → empty list with origin
+            if (func.arguments == null || func.arguments.Count == 0) {
+                var empty = new Runtime.InkList ();
+                empty.SetInitialOriginName (func.name);
+                return new Runtime.ListValue (empty);
+            }
+
+            // Mood(2) with a constant int → single item with that value
+            if (func.arguments.Count == 1) {
+                var num = func.arguments [0] as Number;
+                if (num != null && num.value is int) {
+                    int intVal = (int)num.value;
+                    foreach (var itemDef in listDef.itemDefinitions) {
+                        if (itemDef.seriesValue == intVal) {
+                            var item = new Runtime.InkListItem (func.name, itemDef.name);
+                            return new Runtime.ListValue (item, intVal);
+                        }
+                    }
+                }
+            }
+
+            return null;
         }
 
         void GenerateStructVariableInit (VariableAssignment varDecl, Runtime.Container container)

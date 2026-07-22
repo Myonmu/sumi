@@ -1937,6 +1937,10 @@ namespace Ink.Runtime
                 stored = valueToSet?.Copy () ?? valueToSet;
             }
 
+            // Same as global/temp list assign: empty list keeps prior origin names
+            var oldFieldValue = structVal.value.GetField (fieldName);
+            ListValue.RetainListOriginsForAssignment (oldFieldValue, stored);
+
             structVal.value.SetField (fieldName, stored);
             // In-place mutation of the StructObject is enough; no re-Assign needed.
         }

@@ -51,6 +51,10 @@ namespace Ink.Runtime
             if (refVal != null)
                 return new StructRefValue (refVal.targetName);
 
+            var listVal = value as ListValue;
+            if (listVal != null)
+                return new ListValue (listVal.value);
+
             // Scalars / pointers: Copy() is sufficient (REFVAR identity is StructRefValue above)
             return value.Copy ();
         }

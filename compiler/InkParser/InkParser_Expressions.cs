@@ -62,6 +62,8 @@ namespace Ink
             Expression assignedExpression = (Expression)Expect (Expression, "value expression to be assigned");
 
             if (isIncrement || isDecrement) {
+                if (pathIds != null && pathIds.Count > 1)
+                    return new IncDecExpression (pathIds, assignedExpression, isIncrement);
                 var result = new IncDecExpression (varIdentifier, assignedExpression, isIncrement);
                 return result;
             } else if (pathIds != null && pathIds.Count > 1) {
@@ -220,9 +222,11 @@ namespace Ink
 
                     // Drop down and succeed without the increment after reporting error
                 } else {
-                    // TODO: Language Server - (Identifier combined into one vs. list of Identifiers)
                     var varRef = (VariableReference)expr;
-                    expr = new IncDecExpression(varRef.identifier, isInc);
+                    if (varRef.pathIdentifiers != null && varRef.pathIdentifiers.Count > 1)
+                        expr = new IncDecExpression (varRef.pathIdentifiers, null, isInc);
+                    else
+                        expr = new IncDecExpression(varRef.identifier, isInc);
                 }
 
             }

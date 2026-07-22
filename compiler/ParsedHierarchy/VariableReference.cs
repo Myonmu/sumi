@@ -171,6 +171,25 @@ namespace Ink.Parsed
                 return;
             }
 
+            // List item (also needed when this ref is only a struct-field default —
+            // GenerateIntoContainer never runs for those, so the flag wouldn't be set there)
+            if (path.Count == 1 || path.Count == 2) {
+                string listItemName = null;
+                string listName = null;
+                if (path.Count == 1) {
+                    listItemName = path [0];
+                } else {
+                    listName = path [0];
+                    listItemName = path [1];
+                }
+
+                var listItem = context.ResolveListItem (listName, listItemName, this);
+                if (listItem) {
+                    isListItemReference = true;
+                    return;
+                }
+            }
+
             if (path.Count > 1) {
                 if (IsStructFieldPath ()) {
                     isStructFieldReference = true;

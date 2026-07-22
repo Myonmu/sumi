@@ -217,6 +217,7 @@ namespace Ink.Parsed
     public class IncDecExpression : Expression
     {
         public Identifier varIdentifier;
+        public List<Identifier> pathIdentifiers;
         public bool isInc;
         public Expression expression;
 
@@ -232,12 +233,50 @@ namespace Ink.Parsed
             AddContent (expression);
         }
 
+        public IncDecExpression (List<Identifier> pathIdentifiers, Expression expression, bool isInc)
+        {
+            this.pathIdentifiers = pathIdentifiers;
+            this.varIdentifier = pathIdentifiers != null && pathIdentifiers.Count > 0 ? pathIdentifiers [0] : null;
+            this.isInc = isInc;
+            this.expression = expression;
+            if (expression != null)
+                AddContent (expression);
+        }
+
+        bool isStructFieldTarget {
+            get { return pathIdentifiers != null && pathIdentifiers.Count > 1; }
+        }
+
         public override void GenerateIntoContainer(Runtime.Container container)
         {
             // x = x + y
             // ^^^ ^ ^ ^
             //  4  1 3 2
             // Reverse polish notation: (x 1 +) (assign to x)
+
+            if (isStructFieldTarget) {
+                // parent, parent, fieldVal, delta, +/- → parent, newVal → StructFieldSet
+                var rootName = pathIdentifiers [0].name;
+                if (rootName == "self")
+                    container.AddContent (new Runtime.VariablePointerValue ("self"));
+                else
+                    container.AddContent (new Runtime.VariableReference (rootName));
+
+                for (int i = 1; i < pathIdentifiers.Count - 1; i++)
+                    container.AddContent (new Runtime.StructFieldGet (pathIdentifiers [i].name));
+
+                container.AddContent (Runtime.ControlCommand.Duplicate ());
+                container.AddContent (new Runtime.StructFieldGet (pathIdentifiers [pathIdentifiers.Count - 1].name));
+
+                if (expression)
+                    expression.GenerateIntoContainer (container);
+                else
+                    container.AddContent (new Runtime.IntValue (1));
+
+                container.AddContent (Runtime.NativeFunctionCall.CallWithName (isInc ? "+" : "-"));
+                container.AddContent (new Runtime.StructFieldSet (pathIdentifiers [pathIdentifiers.Count - 1].name));
+                return;
+            }
 
             // 1.
             container.AddContent (new Runtime.VariableReference (varIdentifier?.name));
@@ -262,6 +301,16 @@ namespace Ink.Parsed
         {
             base.ResolveReferences (context);
 
+            if (isStructFieldTarget) {
+                context.ValidateStructFieldAccess (
+                    pathIdentifiers.Select (id => id?.name).ToList (), this);
+
+                if (!(parent is Weave) && !(parent is FlowBase) && !(parent is ContentList)) {
+                    Error ("Can't use " + incrementDecrementWord + " as sub-expression");
+                }
+                return;
+            }
+
             var varResolveResult = context.ResolveVariableWithName(varIdentifier?.name, fromNode: this);
             if (!varResolveResult.found) {
                 Error ("variable for "+incrementDecrementWord+" could not be found: '"+varIdentifier+"' after searching: "+this.descriptionOfScope);
@@ -285,10 +334,16 @@ namespace Ink.Parsed
 
         public override string ToString ()
         {
-            if (expression)
-                return varIdentifier + (isInc ? " += " : " -= ") + expression.ToString ();
+            string target;
+            if (isStructFieldTarget)
+                target = string.Join (".", pathIdentifiers.Select (id => id?.name));
             else
-                return varIdentifier + (isInc ? "++" : "--");
+                target = varIdentifier?.ToString ();
+
+            if (expression)
+                return target + (isInc ? " += " : " -= ") + expression.ToString ();
+            else
+                return target + (isInc ? "++" : "--");
         }
 
         Runtime.VariableAssignment _runtimeAssignment;

@@ -268,6 +268,16 @@ namespace Ink.Parsed
 
         public override void ResolveReferences (Story context)
         {
+            // LIST constructors (Mood() / Mood(2)) are not function diverts.
+            // Struct field defaults never run GenerateIntoContainer, so skip divert resolve.
+            if (context.ResolveList (name) != null) {
+                if (arguments != null) {
+                    foreach (var arg in arguments)
+                        arg.ResolveReferences (context);
+                }
+                return;
+            }
+
             var comps = _proxyDivert.target?.components;
             if (comps != null && comps.Count >= 2) {
                 var pathNames = new List<string> ();
