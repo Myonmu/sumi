@@ -598,6 +598,9 @@ namespace Ink.Runtime
             copy.variablesState = variablesState;
             copy.variablesState.callStack = copy.callStack;
             copy.variablesState.patch = copy._patch;
+            // Struct fields mutate in place; copy instances into the patch so
+            // lookahead field writes can be discarded by RestoreStateSnapshot.
+            copy.variablesState.SnapshotStructGlobalsIntoPatch ();
 
             copy.evaluationStack.AddRange (evaluationStack);
 

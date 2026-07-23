@@ -17,6 +17,8 @@ namespace Ink
             public string outputFile;
             public bool countAllVisits;
             public bool keepOpenAfterStoryFinish;
+            /// <summary>Comma-separated file:line breakpoints, e.g. story.ink:12,other.ink:3</summary>
+            public string breakpoints;
 		}
 
 		public static int ExitCodeError = 1;
@@ -39,7 +41,8 @@ namespace Ink
                 "   -v:              Verbose mode - print compilation timings\n"+
                 "   -k:              Keep inklecate running in play mode even after story is complete\n" +
                 "   -x <directory>:              Import plugins for the compiler.\n" +
-                "   -d <define>:     Adds a preprocessor symbol (you can have multiple -d)"
+                "   -d <define>:     Adds a preprocessor symbol (you can have multiple -d)\n"+
+                "   -b <breakpoints>: Comma-separated file:line breakpoints for play mode\n"
                 );
             Environment.Exit (ExitCodeError);
         }
@@ -195,6 +198,10 @@ namespace Ink
 
                 var player = new CommandLinePlayer (story, false, compiler, opts.keepOpenAfterStoryFinish, opts.jsonOutput);
 
+                if (!string.IsNullOrEmpty (opts.breakpoints)) {
+                    player.ApplyBreakpoints (ParseBreakpointList (opts.breakpoints));
+                }
+
                 //Capture a CTRL+C key combo so we can restore the console's foreground color back to normal when exiting
                 Console.CancelKeyPress += OnExit;
 
@@ -275,6 +282,28 @@ namespace Ink
             Console.WriteLine (writer.ToString ());
         }
 
+        static List<BreakpointSpec> ParseBreakpointList (string spec)
+        {
+            var list = new List<BreakpointSpec> ();
+            if (string.IsNullOrEmpty (spec))
+                return list;
+
+            foreach (var token in spec.Split (new[] { ',' }, StringSplitOptions.RemoveEmptyEntries)) {
+                var trimmed = token.Trim ();
+                int colon = trimmed.LastIndexOf (':');
+                if (colon <= 0 || colon >= trimmed.Length - 1)
+                    continue;
+                int line;
+                if (!int.TryParse (trimmed.Substring (colon + 1), out line) || line < 1)
+                    continue;
+                list.Add (new BreakpointSpec {
+                    fileName = trimmed.Substring (0, colon),
+                    lineNumber = line
+                });
+            }
+            return list;
+        }
+
         private void OnExit(object sender, ConsoleCancelEventArgs e)
         {
             Console.ResetColor();
@@ -330,7 +359,7 @@ namespace Ink
                 writer.WriteArrayEnd();
                 writer.WritePropertyEnd();
                 writer.WriteObjectEnd();
-                Console.Write (writer.ToString());
+                Console.WriteLine (writer.ToString());
             }
 
             // Human consumption
@@ -359,6 +388,7 @@ namespace Ink
             bool nextArgIsOutputFilename = false;
             bool nextArgIsPluginDirectory = false;
             bool nextArgIsPreprocessorSymbol = false;
+            bool nextArgIsBreakpoints = false;
 
 			// Process arguments
             int argIdx = 0;
@@ -374,6 +404,9 @@ namespace Ink
                 {
                     preprocessorSymbols.Add(arg);
                     nextArgIsPreprocessorSymbol = false;
+                } else if (nextArgIsBreakpoints) {
+                    opts.breakpoints = arg;
+                    nextArgIsBreakpoints = false;
                 }
 
 				// Options
@@ -410,6 +443,9 @@ namespace Ink
                             break;
                         case 'd':
                             nextArgIsPreprocessorSymbol = true;
+                            break;
+                        case 'b':
+                            nextArgIsBreakpoints = true;
                             break;
                         default:
                             Console.WriteLine ("Unsupported argument type: '{0}'", argChar);

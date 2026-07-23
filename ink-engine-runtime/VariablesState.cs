@@ -399,6 +399,40 @@ namespace Ink.Runtime
             patch = null;
         }
 
+        /// <summary>
+        /// Struct/dynamic instances are mutable and stored by reference. During
+        /// newline lookahead (and background-save patching), field writes must
+        /// not mutate the live globals or <see cref="Story.RestoreStateSnapshot"/>
+        /// cannot roll them back — unlike plain ints, which replace the global
+        /// entry via <see cref="SetGlobal"/>. Eagerly copy every struct global
+        /// into the patch so subsequent in-place field sets touch the copy only.
+        /// </summary>
+        public void SnapshotStructGlobalsIntoPatch()
+        {
+            if (patch == null)
+                return;
+
+            // Snapshot keys first — patch.SetGlobal may grow the dictionary.
+            var names = new List<string> (_globalVariables.Keys);
+            foreach (var name in names) {
+                Runtime.Object current;
+                if (patch.TryGetGlobal (name, out current)) {
+                    var patchedStruct = current as StructValue;
+                    if (patchedStruct != null)
+                        patch.SetGlobal (name, (StructValue)patchedStruct.Copy ());
+                    continue;
+                }
+
+                Runtime.Object globalVal;
+                if (!_globalVariables.TryGetValue (name, out globalVal))
+                    continue;
+
+                var structVal = globalVal as StructValue;
+                if (structVal != null)
+                    patch.SetGlobal (name, (StructValue)structVal.Copy ());
+            }
+        }
+
         public void SetJsonToken(Dictionary<string, object> jToken)
         {
             _globalVariables.Clear();

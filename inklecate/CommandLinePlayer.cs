@@ -95,7 +95,7 @@ namespace Ink
                         
                         else {
                             // Johnny Five, he's alive!
-                            Console.Write("{\"needInput\": true}");
+                            Console.WriteLine("{\"needInput\": true}");
                         }
 
                         string userInput = Console.ReadLine ();
@@ -116,7 +116,17 @@ namespace Ink
 
                         var result = ReadCommandLineInput (userInput);
 
-                        if (result.output != null) {
+                        if (result.appliedBreakpoints)
+                            continue;
+
+                        if (result.inspectJson != null) {
+                            if (_jsonOutput) {
+                                Console.WriteLine ("{\"inspect\":" + result.inspectJson + "}");
+                            } else {
+                                Console.WriteLine (result.inspectJson);
+                            }
+                        }
+                        else if (result.output != null) {
                             if( _jsonOutput ) {
                                 var writer = new Runtime.SimpleJson.Writer();
                                 writer.WriteObjectStart();
@@ -241,6 +251,13 @@ namespace Ink
                 _errors.Clear();
                 _warnings.Clear();
 
+                if (story.hasHitBreakpoint) {
+                    if (!WaitForBreakpointContinue ())
+                        return;
+                    story.ResumeFromBreakpoint ();
+                    continue;
+                }
+
                 // Start limiting the output rate if it looks like we might be
                 // getting into an infinite loop. This prevents Inky from getting
                 // choked up because its IPC gets overloaded from useless data,
@@ -262,6 +279,77 @@ namespace Ink
             }
         }
 
+        bool WaitForBreakpointContinue ()
+        {
+            var dm = story.hitBreakpointMetadata;
+            if (_jsonOutput) {
+                var writer = new Runtime.SimpleJson.Writer();
+                writer.WriteObjectStart();
+                writer.WritePropertyStart("breakpoint");
+                writer.WriteObjectStart();
+                writer.WriteProperty("filename", dm != null && dm.fileName != null ? dm.fileName : "");
+                writer.WriteProperty("lineNumber", dm != null ? dm.startLineNumber : 0);
+                writer.WriteObjectEnd();
+                writer.WritePropertyEnd();
+                writer.WriteObjectEnd();
+                Console.WriteLine(writer.ToString());
+            } else {
+                if (dm != null)
+                    Console.WriteLine ("Breakpoint: " + dm.ToString ());
+                else
+                    Console.WriteLine ("Breakpoint hit");
+                Console.Write ("(continue) ?> ");
+            }
+
+            while (true) {
+                if (_jsonOutput) {
+                    // Distinct from choice needInput so Inky does not treat this as a choice prompt
+                    Console.WriteLine("{\"needContinue\": true}");
+                }
+
+                string userInput = Console.ReadLine ();
+                if (userInput == null) {
+                    if (_jsonOutput)
+                        Console.WriteLine ("{\"close\": true}");
+                    else
+                        Console.WriteLine ("<User input stream closed.>");
+                    return false;
+                }
+
+                var result = ReadCommandLineInput (userInput);
+
+                if (result.appliedBreakpoints)
+                    continue;
+
+                if (result.inspectJson != null) {
+                    if (_jsonOutput)
+                        Console.WriteLine ("{\"inspect\":" + result.inspectJson + "}");
+                    else
+                        Console.WriteLine (result.inspectJson);
+                    continue;
+                }
+
+                if (result.output != null) {
+                    if (_jsonOutput) {
+                        var writer = new Runtime.SimpleJson.Writer();
+                        writer.WriteObjectStart();
+                        writer.WriteProperty("cmdOutput", result.output);
+                        writer.WriteObjectEnd();
+                        Console.WriteLine(writer.ToString());
+                    } else {
+                        Console.WriteLine (result.output);
+                    }
+                    continue;
+                }
+
+                if (result.requestsExit)
+                    return false;
+
+                if (result.isContinue || result.isPlay)
+                    return true;
+            }
+        }
+
         void OnStoryError(string msg, ErrorType type)
         {
             if( type == ErrorType.Error )
@@ -274,6 +362,29 @@ namespace Ink
             var inputParser = new InkParser (userInput);
             var inputResult = inputParser.CommandLineUserInput ();
             var result = new Compiler.CommandLineInputResult ();
+
+            if (inputResult == null) {
+                result.output = "Unexpected input. Type 'help' or a choice number.";
+                return result;
+            }
+
+            // Breakpoints (also handled during handshake / pause)
+            if (inputResult.hasSetBreakpoints) {
+                ApplyBreakpoints (inputResult.breakpoints);
+                result.appliedBreakpoints = true;
+                return result;
+            }
+
+            // Resume / start
+            if (inputResult.isContinue) {
+                result.isContinue = true;
+                return result;
+            }
+
+            if (inputResult.isPlay) {
+                result.isPlay = true;
+                return result;
+            }
 
             // Choice
             if (inputResult.choiceInput != null) {
@@ -306,6 +417,17 @@ namespace Ink
             return result;
         }
 
+        public void ApplyBreakpoints (List<BreakpointSpec> breakpoints)
+        {
+            var list = new List<Story.Breakpoint> ();
+            if (breakpoints != null) {
+                foreach (var bp in breakpoints) {
+                    list.Add (new Story.Breakpoint (bp.fileName, bp.lineNumber));
+                }
+            }
+            story.SetBreakpoints (list);
+        }
+
         Compiler _compiler;
         bool _jsonOutput;
         List<string> _errors = new List<string>();
@@ -314,4 +436,3 @@ namespace Ink
 
 
 }
-

@@ -5162,6 +5162,161 @@ VAR bag: Bag
         }
 
         [Test()]
+        public void TestStructAndDynamicSaveLoadAfterMutationAndAddition()
+        {
+            var story = CompileString(@"
+=== struct Character ===
+VAR name = ""anonymous""
+VAR nerves = 1
+
+=== dynamic Bag ===
+VAR score = 1
+= function Bonus() =
+~ return self.score + 1
+===
+VAR Oswald: Character
+VAR bag: Bag
+
+-> start
+=== start ===
+~ Oswald.name = ""Flinn""
+~ Oswald.nerves = 3
+~ bag.score = 7
+~ bag.extra = 2
+{Oswald.name}
+{bag.Bonus()}
+-> END
+");
+            Assert.AreEqual("Flinn\n8\n", story.ContinueMaximally());
+
+            var json = story.state.ToJson();
+            story.state.LoadJson(json);
+
+            var oswald = story.variablesState.GetVariableWithName("Oswald") as Ink.Runtime.StructValue;
+            Assert.IsNotNull(oswald);
+            Assert.AreEqual("Character", oswald.value.typeName);
+            Assert.IsFalse(oswald.value.isDynamic);
+            var nameVal = oswald.value.GetField("name") as Ink.Runtime.StringValue;
+            Assert.AreEqual("Flinn", nameVal.value);
+            var nervesVal = oswald.value.GetField("nerves") as Ink.Runtime.IntValue;
+            Assert.AreEqual(3, nervesVal.value);
+
+            var bag = story.variablesState.GetVariableWithName("bag") as Ink.Runtime.StructValue;
+            Assert.IsNotNull(bag);
+            Assert.IsTrue(bag.value.isDynamic);
+            Assert.AreEqual("Bag", bag.value.typeName);
+            Assert.IsTrue(bag.value.HasField("extra"));
+            var extraVal = bag.value.GetField("extra") as Ink.Runtime.IntValue;
+            Assert.AreEqual(2, extraVal.value);
+            var scoreVal = bag.value.GetField("score") as Ink.Runtime.IntValue;
+            Assert.AreEqual(7, scoreVal.value);
+            Assert.IsTrue(bag.value.HasMethod("Bonus"));
+        }
+
+        [Test()]
+        public void TestInspectVarCommandForStructGlobal()
+        {
+            var source = @"
+=== struct Character ===
+VAR name = ""anonymous""
+VAR nerves = 1
+= function ReactFurious() =
+~ return
+
+=== struct Oswald: Character ===
+VAR name = ""Flinn Oswald""
+= function ReactFurious() =
+~ base.ReactFurious()
+Oh my!
+~ return
+
+VAR Oswald: Oswald
+
+-> start
+=== start ===
+{Oswald.name}
+* continue
+    ~ Oswald.nerves = 3
+    {Oswald.nerves}
+    -> END
+";
+            var compiler = new Compiler(source);
+            var story = compiler.Compile();
+            Assert.IsNotNull(story);
+
+            Assert.AreEqual("Flinn Oswald\n", story.Continue());
+            Assert.AreEqual(1, story.currentChoices.Count);
+
+            // Parser path used by inklecate stdin
+            var parsed = new InkParser("InspectVar Oswald").CommandLineUserInput();
+            Assert.IsNotNull(parsed);
+            Assert.AreEqual("Oswald", parsed.inspectVariableName);
+
+            var input = new CommandLineInput { inspectVariableName = "Oswald" };
+            var result = compiler.HandleInput(input);
+            Assert.IsNotNull(result);
+            Assert.IsNotNull(result.inspectJson);
+
+            var root = SimpleJson.TextToDictionary(result.inspectJson);
+            Assert.AreEqual("Oswald", root["name"]);
+            Assert.AreEqual("struct", root["kind"]);
+            Assert.AreEqual("Oswald", root["typeName"]);
+
+            var fields = (Dictionary<string, object>)root["fields"];
+            Assert.AreEqual("Flinn Oswald", fields["name"]);
+            Assert.AreEqual(1, Convert.ToInt32(fields["nerves"]));
+
+            var methods = (Dictionary<string, object>)root["methods"];
+            Assert.IsTrue(methods.ContainsKey("ReactFurious"));
+
+            // After choice, nerves should update in a fresh inspect
+            story.ChooseChoiceIndex(0);
+            story.ContinueMaximally();
+
+            result = compiler.HandleInput(input);
+            root = SimpleJson.TextToDictionary(result.inspectJson);
+            fields = (Dictionary<string, object>)root["fields"];
+            Assert.AreEqual(3, Convert.ToInt32(fields["nerves"]));
+
+            // Unknown variable
+            result = compiler.HandleInput(new CommandLineInput { inspectVariableName = "nope" });
+            root = SimpleJson.TextToDictionary(result.inspectJson);
+            Assert.AreEqual("Unknown variable", root["error"]);
+        }
+
+        [Test()]
+        public void TestStructFieldMutationSurvivesNewlineLookahead()
+        {
+            // Printing a line, then mutating a struct field on the next logic line,
+            // used to apply the mutation during glue/newline lookahead and again for
+            // real — because field sets mutated StructObject in place and the
+            // snapshot restore could not roll them back.
+            var story = CompileString(@"
+=== dynamic DyList ===
+VAR count = 0
+= function RemoveAt(i)
+{i + 1 < self.count:
+    ~ self.RemoveAt(i + 1)
+  - else:
+    ~ self.count--
+}
+===
+VAR someList : DyList
+~ someList.count = 2
+before={someList.count}
+~ someList.RemoveAt(1)
+after={someList.count}
+");
+
+            Assert.AreEqual("before=2\nafter=1\n", story.ContinueMaximally());
+
+            var list = story.variablesState.GetVariableWithName("someList") as Ink.Runtime.StructValue;
+            Assert.IsNotNull(list);
+            var count = list.value.GetField("count") as Ink.Runtime.IntValue;
+            Assert.AreEqual(1, count.value);
+        }
+
+        [Test()]
         public void TestEvaluatedDotAccessOnStructDynamicAndPath()
         {
             var story = CompileString(@"
@@ -5206,6 +5361,93 @@ arrived
 -> END
 ");
             Assert.AreEqual("anon\nSam\n3\nHello from Sam\n0\n10\narrived\n", story.ContinueMaximally());
+        }
+
+        [Test()]
+        public void TestBreakpointPausesBeforeExecutingLine()
+        {
+            // Debug metadata is not preserved through JSON round-trip.
+            if (_mode == TestMode.JsonRoundTrip)
+                return;
+
+            var source = @"Hello
+World
+-> END
+";
+            var compiler = new Compiler(source, new Compiler.Options {
+                sourceFilename = "test.ink"
+            });
+            var story = compiler.Compile();
+            Assert.IsNotNull(story);
+
+            story.SetBreakpoints(new[] {
+                new Story.Breakpoint("test.ink", 2)
+            });
+
+            // Continue produces the prior line, then newline-lookahead reaches line 2 and pauses
+            // before executing it.
+            var text = story.Continue();
+            Assert.AreEqual("Hello\n", text);
+            Assert.IsTrue(story.hasHitBreakpoint);
+            Assert.IsNotNull(story.hitBreakpointMetadata);
+            Assert.AreEqual(2, story.hitBreakpointMetadata.startLineNumber);
+            Assert.AreEqual("test.ink", story.hitBreakpointMetadata.fileName);
+
+            story.ResumeFromBreakpoint();
+            Assert.IsFalse(story.hasHitBreakpoint);
+            Assert.AreEqual("World\n", story.Continue());
+            Assert.IsFalse(story.hasHitBreakpoint);
+        }
+
+        [Test()]
+        public void TestBreakpointOnStructMethodCallSite()
+        {
+            if (_mode == TestMode.JsonRoundTrip)
+                return;
+
+            var source = @"=== dynamic DyList ===
+VAR count = 0
+= function Add(item)
+~self.{self.count} = item
+~self.count ++
+===
+VAR someList : DyList
+~someList.Add(""one"")
+~someList.Add(""two"")
+{someList.count}
+";
+            var compiler = new Compiler(source, new Compiler.Options {
+                sourceFilename = "story.ink"
+            });
+            var story = compiler.Compile();
+            Assert.IsNotNull(story);
+
+            var lines = source.Replace("\r\n", "\n").Split('\n');
+            var bpLines = new List<int>();
+            for (int i = 0; i < lines.Length; i++) {
+                if (lines[i].Contains("~someList.Add"))
+                    bpLines.Add(i + 1);
+            }
+            Assert.AreEqual(2, bpLines.Count);
+
+            var breakpoints = new List<Story.Breakpoint>();
+            foreach (var l in bpLines)
+                breakpoints.Add(new Story.Breakpoint("story.ink", l));
+            story.SetBreakpoints(breakpoints);
+
+            var hits = new List<int>();
+            var output = new StringBuilder();
+            int guard = 0;
+            while (story.canContinue && guard++ < 40) {
+                output.Append(story.Continue());
+                if (story.hasHitBreakpoint) {
+                    hits.Add(story.hitBreakpointMetadata.startLineNumber);
+                    story.ResumeFromBreakpoint();
+                }
+            }
+
+            Assert.AreEqual(bpLines, hits);
+            Assert.AreEqual("2\n", output.ToString());
         }
 
         private class TestWarningException : System.Exception

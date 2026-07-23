@@ -180,6 +180,82 @@ namespace Ink.Runtime
         public event Action<string, object[]> onChoosePathString;
 
         /// <summary>
+        /// True when Continue() stopped because the next instruction matched a breakpoint,
+        /// before that instruction was executed.
+        /// </summary>
+        public bool hasHitBreakpoint { get { return _hasHitBreakpoint; } }
+
+        /// <summary>
+        /// Debug metadata for the instruction that triggered the current breakpoint pause.
+        /// </summary>
+        public DebugMetadata hitBreakpointMetadata { get { return _hitBreakpointMetadata; } }
+
+        /// <summary>
+        /// Replace the active breakpoint set. Pass an empty list to clear.
+        /// Each entry is (fileName, lineNumber) where lineNumber is 1-based ink source line.
+        /// fileName may be null/empty to match content with no filename (e.g. tests).
+        /// </summary>
+        public void SetBreakpoints(IEnumerable<Breakpoint> breakpoints)
+        {
+            _breakpoints.Clear();
+            if (breakpoints == null)
+                return;
+
+            foreach (var bp in breakpoints) {
+                if (bp.lineNumber < 1)
+                    continue;
+                _breakpoints.Add(MakeBreakpointKey(bp.fileName, bp.lineNumber));
+            }
+        }
+
+        /// <summary>
+        /// Clear all breakpoints.
+        /// </summary>
+        public void ClearBreakpoints()
+        {
+            _breakpoints.Clear();
+        }
+
+        /// <summary>
+        /// After a breakpoint hit, call this before Continue() so the paused instruction
+        /// runs. Further hits on the same source line are suppressed until the story
+        /// leaves that line at the original call-stack depth (so nested method bodies
+        /// don't clear the suppression and re-break on return).
+        /// </summary>
+        public void ResumeFromBreakpoint()
+        {
+            if (!_hasHitBreakpoint)
+                return;
+
+            if (_hitBreakpointMetadata != null) {
+                _suppressBreakpointsOnLineKey = MakeBreakpointKey (_hitBreakpointMetadata.fileName, _hitBreakpointMetadata.startLineNumber);
+                _suppressBreakpointsStackDepth = state.callStack.elements.Count;
+            } else {
+                _suppressBreakpointsOnLineKey = null;
+                _suppressBreakpointsStackDepth = -1;
+            }
+
+            _hasHitBreakpoint = false;
+            _hitBreakpointMetadata = null;
+            _skipBreakpointOnce = true;
+        }
+
+        /// <summary>
+        /// A source location used with <see cref="SetBreakpoints"/>.
+        /// </summary>
+        public struct Breakpoint
+        {
+            public string fileName;
+            public int lineNumber;
+
+            public Breakpoint(string fileName, int lineNumber)
+            {
+                this.fileName = fileName;
+                this.lineNumber = lineNumber;
+            }
+        }
+
+        /// <summary>
         /// Start recording ink profiling information during calls to Continue on Story.
         /// Return a Profiler instance that you can request a report from when you're finished.
         /// </summary>
@@ -496,6 +572,9 @@ namespace Ink.Runtime
                     AddError (e.Message, useEndLineNumber:e.useEndLineNumber);
                     break;
                 }
+
+                if (_hasHitBreakpoint)
+                    break;
                 
                 if (outputStreamEndsInNewline) 
                     break;
@@ -511,14 +590,26 @@ namespace Ink.Runtime
 
             Dictionary<string, Object> changedVariablesToObserve = null;
 
-            // 4 outcomes:
+            // 5 outcomes:
+            //  - hit a breakpoint (paused before executing that instruction)
             //  - got newline (so finished this line of text)
             //  - can't continue (e.g. choices or ending)
             //  - ran out of time during evaluation
             //  - error
             //
+            // Paused at breakpoint: flush this Continue without rewinding, leave pointer on the BP instruction.
+            if (_hasHitBreakpoint) {
+                DiscardSnapshot ();
+
+                if (_recursiveContinueCount == 1)
+                    changedVariablesToObserve = _state.variablesState.CompleteVariableObservation();
+
+                _asyncContinueActive = false;
+                if (onDidContinue != null) onDidContinue();
+            }
+
             // Successfully finished evaluation in time (or in error)
-            if (outputStreamEndsInNewline || !canContinue) {
+            else if (outputStreamEndsInNewline || !canContinue) {
 
                 // Need to rewind, due to evaluating further than we should?
                 if( _stateSnapshotAtLastNewline != null ) {
@@ -759,6 +850,8 @@ namespace Ink.Runtime
 
             while (canContinue) {
                 sb.Append (Continue ());
+                if (hasHitBreakpoint)
+                    break;
             }
 
             return sb.ToString ();
@@ -934,6 +1027,17 @@ namespace Ink.Runtime
             // Stop flow if we hit a stack pop when we're unable to pop (e.g. return/done statement in knot
             // that was diverted to rather than called as a function)
             var currentContentObj = pointer.Resolve ();
+
+            // Pause before executing this instruction when it matches a breakpoint.
+            if (ShouldBreakBeforeExecuting (currentContentObj)) {
+                _hasHitBreakpoint = true;
+                _hitBreakpointMetadata = currentContentObj.debugMetadata;
+                return;
+            }
+
+            // After ResumeFromBreakpoint, allow this instruction to run once.
+            _skipBreakpointOnce = false;
+
             bool isLogicOrFlowControl = PerformLogicAndFlowControl (currentContentObj);
 
             // Has flow been forced to end by flow control above?
@@ -3615,6 +3719,60 @@ namespace Ink.Runtime
             }
         }
 
+        bool ShouldBreakBeforeExecuting (Object contentObj)
+        {
+            if (_breakpoints.Count == 0 || _skipBreakpointOnce)
+                return false;
+
+            // Don't break during choice string evaluation, expression eval, or game-driven evaluation.
+            if (_temporaryEvaluationContainer != null)
+                return false;
+            if (state.inStringEvaluation)
+                return false;
+            if (state.callStack.elementIsEvaluateFromGame)
+                return false;
+            if (contentObj == null)
+                return false;
+
+            var dm = contentObj.debugMetadata;
+            if (dm == null || dm.startLineNumber < 1)
+                return false;
+
+            var key = MakeBreakpointKey (dm.fileName, dm.startLineNumber);
+
+            // After resume, ignore further hits on the same source line until we leave it
+            // at the stack depth where we paused. Nested calls (deeper stack, other lines)
+            // must not clear that suppression — otherwise returning to the call site re-breaks.
+            if (_suppressBreakpointsOnLineKey != null) {
+                int depth = state.callStack.elements.Count;
+                if (key == _suppressBreakpointsOnLineKey) {
+                    return false;
+                }
+                if (depth > _suppressBreakpointsStackDepth) {
+                    // Inside a nested call from the suppressed line — allow other BPs.
+                    return _breakpoints.Contains (key);
+                }
+                // Left the line at the original (or shallower) depth.
+                _suppressBreakpointsOnLineKey = null;
+                _suppressBreakpointsStackDepth = -1;
+            }
+
+            return _breakpoints.Contains (key);
+        }
+
+        static string MakeBreakpointKey (string fileName, int lineNumber)
+        {
+            return NormalizeBreakpointFileName (fileName) + "\n" + lineNumber;
+        }
+
+        static string NormalizeBreakpointFileName (string fileName)
+        {
+            if (string.IsNullOrEmpty (fileName))
+                return "";
+
+            return fileName.Replace ('\\', '/').Trim ().ToLowerInvariant ();
+        }
+
         Container _mainContentContainer;
         ListDefinitionsOrigin _listDefinitions;
         StructDefinitionsOrigin _structDefinitions;
@@ -3640,6 +3798,13 @@ namespace Ink.Runtime
         bool _asyncSaving;
 
         Profiler _profiler;
+
+        HashSet<string> _breakpoints = new HashSet<string> ();
+        bool _hasHitBreakpoint;
+        DebugMetadata _hitBreakpointMetadata;
+        bool _skipBreakpointOnce;
+        string _suppressBreakpointsOnLineKey;
+        int _suppressBreakpointsStackDepth = -1;
 	}
 }
 

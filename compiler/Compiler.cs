@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using Ink;
+using Ink.Runtime;
 
 namespace Ink
 {
@@ -67,6 +68,11 @@ namespace Ink
             public int choiceIdx = -1;
             public string divertedPath;
             public string output;
+            /// <summary>JSON object body for an InspectVar response (no outer wrapper).</summary>
+            public string inspectJson;
+            public bool appliedBreakpoints;
+            public bool isContinue;
+            public bool isPlay;
         }
         public CommandLineInputResult HandleInput (CommandLineInput inputResult)
         {
@@ -93,6 +99,11 @@ namespace Ink
                     result.output = "DebugSource: Unknown source";
             }
 
+            // Variable inspector dump for IDEs (Inky)
+            else if (inputResult.inspectVariableName != null) {
+                result.inspectJson = BuildInspectVariableJson (inputResult.inspectVariableName);
+            }
+
             // User entered some ink
             else if (inputResult.userImmediateModeStatement != null) {
                 var parsedObj = inputResult.userImmediateModeStatement as Parsed.Object;
@@ -103,6 +114,170 @@ namespace Ink
             }
 
             return result;
+        }
+
+        string BuildInspectVariableJson (string name)
+        {
+            var writer = new SimpleJson.Writer ();
+            writer.WriteObjectStart ();
+            writer.WriteProperty ("name", name);
+
+            var value = _runtimeStory.variablesState.GetVariableWithName (name);
+            if (value == null) {
+                writer.WriteProperty ("error", "Unknown variable");
+                writer.WriteObjectEnd ();
+                return writer.ToString ();
+            }
+
+            var structVal = value as StructValue;
+            if (structVal != null && structVal.value != null) {
+                WriteInspectStruct (writer, structVal.value);
+            } else {
+                writer.WriteProperty ("kind", "value");
+                writer.WritePropertyStart ("value");
+                WriteInspectValue (writer, value, nestingDepth: 0);
+                writer.WritePropertyEnd ();
+            }
+
+            writer.WriteObjectEnd ();
+            return writer.ToString ();
+        }
+
+        void WriteInspectStruct (SimpleJson.Writer writer, StructObject instance)
+        {
+            writer.WriteProperty ("kind", instance.isDynamic ? "dynamic" : "struct");
+            writer.WriteProperty ("typeName", instance.typeName ?? "");
+
+            writer.WritePropertyStart ("fields");
+            writer.WriteObjectStart ();
+            if (instance.storage != null) {
+                foreach (var kv in instance.storage) {
+                    writer.WritePropertyStart (kv.Key);
+                    WriteInspectValue (writer, kv.Value, nestingDepth: 0);
+                    writer.WritePropertyEnd ();
+                }
+            }
+            writer.WriteObjectEnd ();
+            writer.WritePropertyEnd ();
+
+            writer.WritePropertyStart ("methods");
+            writer.WriteObjectStart ();
+            var typeDef = _runtimeStory.structDefinitions != null
+                ? _runtimeStory.structDefinitions.GetDefinition (instance.typeName)
+                : null;
+            if (typeDef != null && typeDef.methods != null) {
+                foreach (var kv in typeDef.methods)
+                    writer.WriteProperty (kv.Key, kv.Value);
+            }
+            writer.WriteObjectEnd ();
+            writer.WritePropertyEnd ();
+
+            if (instance.isDynamic && instance.methods != null && instance.methods.Count > 0) {
+                writer.WritePropertyStart ("dynamicMethods");
+                writer.WriteObjectStart ();
+                foreach (var kv in instance.methods) {
+                    var divertTarget = kv.Value as DivertTargetValue;
+                    writer.WriteProperty (kv.Key,
+                        divertTarget != null && divertTarget.value != null
+                            ? divertTarget.value.ToString ()
+                            : (kv.Value != null ? kv.Value.ToString () : ""));
+                }
+                writer.WriteObjectEnd ();
+                writer.WritePropertyEnd ();
+            }
+        }
+
+        void WriteInspectValue (SimpleJson.Writer writer, Runtime.Object obj, int nestingDepth)
+        {
+            if (obj == null) {
+                writer.WriteNull ();
+                return;
+            }
+
+            var boolVal = obj as BoolValue;
+            if (boolVal != null) {
+                writer.Write (boolVal.value);
+                return;
+            }
+
+            var intVal = obj as IntValue;
+            if (intVal != null) {
+                writer.Write (intVal.value);
+                return;
+            }
+
+            var floatVal = obj as FloatValue;
+            if (floatVal != null) {
+                writer.Write (floatVal.value);
+                return;
+            }
+
+            var strVal = obj as StringValue;
+            if (strVal != null) {
+                writer.Write (strVal.value ?? "");
+                return;
+            }
+
+            var listVal = obj as ListValue;
+            if (listVal != null) {
+                writer.WriteArrayStart ();
+                if (listVal.value != null) {
+                    foreach (var kv in listVal.value) {
+                        writer.WriteObjectStart ();
+                        writer.WriteProperty ("item", kv.Key.fullName);
+                        writer.WriteProperty ("value", kv.Value);
+                        writer.WriteObjectEnd ();
+                    }
+                }
+                writer.WriteArrayEnd ();
+                return;
+            }
+
+            var structRefVal = obj as StructRefValue;
+            if (structRefVal != null) {
+                writer.WriteObjectStart ();
+                writer.WriteProperty ("ref", structRefVal.targetName ?? "");
+                writer.WriteObjectEnd ();
+                return;
+            }
+
+            var divertTargetVal = obj as DivertTargetValue;
+            if (divertTargetVal != null) {
+                writer.Write (divertTargetVal.value != null ? divertTargetVal.value.ToString () : "");
+                return;
+            }
+
+            var nestedStruct = obj as StructValue;
+            if (nestedStruct != null) {
+                if (nestedStruct.value == null) {
+                    writer.WriteNull ();
+                    return;
+                }
+                // One level of nested field expansion; deeper nests as summaries.
+                if (nestingDepth < 1) {
+                    writer.WriteObjectStart ();
+                    writer.WriteProperty ("kind", nestedStruct.value.isDynamic ? "dynamic" : "struct");
+                    writer.WriteProperty ("typeName", nestedStruct.value.typeName ?? "");
+                    writer.WritePropertyStart ("fields");
+                    writer.WriteObjectStart ();
+                    if (nestedStruct.value.storage != null) {
+                        foreach (var kv in nestedStruct.value.storage) {
+                            writer.WritePropertyStart (kv.Key);
+                            WriteInspectValue (writer, kv.Value, nestingDepth + 1);
+                            writer.WritePropertyEnd ();
+                        }
+                    }
+                    writer.WriteObjectEnd ();
+                    writer.WritePropertyEnd ();
+                    writer.WriteObjectEnd ();
+                } else {
+                    writer.Write ((nestedStruct.value.isDynamic ? "dynamic(" : "struct(")
+                        + nestedStruct.value.typeName + ")");
+                }
+                return;
+            }
+
+            writer.Write (obj.ToString ());
         }
 
         CommandLineInputResult ExecuteImmediateStatement(Parsed.Object parsedObj) {
