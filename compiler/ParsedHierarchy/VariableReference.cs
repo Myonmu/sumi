@@ -104,7 +104,7 @@ namespace Ink.Parsed
             container.AddContent (_runtimeVarRef);
         }
 
-        bool IsStructFieldPath ()
+        public bool IsStructFieldPath ()
         {
             if (path.Count < 2)
                 return false;
@@ -205,8 +205,36 @@ namespace Ink.Parsed
             }
 
             if (!context.ResolveVariableWithName (this.name, fromNode: this).found) {
+                // Kind queries: `x is dynamic` / `x is struct`
+                if (path.Count == 1 && (name == "dynamic" || name == "struct")
+                    && IsUnderBinaryOp ("is", "isnt"))
+                    return;
+                // Slot name in `dyn has slotName` — bare identifier becomes a string at codegen
+                // (opName may already be native "?" / "!?" if Generate ran before Resolve)
+                if (path.Count == 1 && IsUnderBinaryOp ("has", "hasnt", "?", "!?"))
+                    return;
                 Error("Unresolved variable: "+this.ToString(), this);
             }
+        }
+
+        bool IsUnderBinaryOp (params string[] opNames)
+        {
+            var node = parent;
+            while (node != null) {
+                var bin = node as BinaryExpression;
+                if (bin != null) {
+                    foreach (var op in opNames) {
+                        if (bin.opName == op)
+                            return true;
+                    }
+                    return false;
+                }
+                // Stop at non-expression containers
+                if (!(node is Expression))
+                    break;
+                node = node.parent;
+            }
+            return false;
         }
 
         void ValidateStructFieldPath (Story context)

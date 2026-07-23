@@ -66,13 +66,54 @@ namespace Ink.Parsed
 
         public override void GenerateIntoContainer(Runtime.Container container)
 		{
+            bool isHasOp = opName == "has" || opName == "hasnt";
+            bool isIsOp = opName == "is" || opName == "isnt";
+
 			leftExpression.GenerateIntoContainer (container);
-			rightExpression.GenerateIntoContainer (container);
+
+            if (isIsOp) {
+                var rhsVar = rightExpression as VariableReference;
+                if (rhsVar != null
+                    && (rhsVar.path == null || rhsVar.path.Count == 1)
+                    && (rhsVar.name == "dynamic" || rhsVar.name == "struct")) {
+                    var sentinel = rhsVar.name == "dynamic"
+                        ? Runtime.StructDeclaration.KindQueryDynamic
+                        : Runtime.StructDeclaration.KindQueryStruct;
+                    container.AddContent (new Runtime.StringValue (sentinel));
+                } else {
+                    rightExpression.GenerateIntoContainer (container);
+                }
+            } else if (isHasOp && LeftIsStructOrDynamicOperand ()) {
+                var rhsVar = rightExpression as VariableReference;
+                if (rhsVar != null && (rhsVar.path == null || rhsVar.path.Count == 1)) {
+                    container.AddContent (new Runtime.StringValue (rhsVar.name));
+                } else {
+                    rightExpression.GenerateIntoContainer (container);
+                }
+            } else {
+                rightExpression.GenerateIntoContainer (container);
+            }
 
             opName = NativeNameForOp (opName);
 
             container.AddContent(Runtime.NativeFunctionCall.CallWithName(opName));
 		}
+
+        bool LeftIsStructOrDynamicOperand ()
+        {
+            if (story == null)
+                return false;
+            var leftVar = leftExpression as VariableReference;
+            if (leftVar == null || leftVar.path == null || leftVar.path.Count < 1)
+                return false;
+            // Struct/dynamic instance or field path
+            if (leftVar.path.Count >= 2)
+                return leftVar.IsStructFieldPath ();
+            var typeName = story.ResolveStructTypeNameForName (leftVar.path [0], this);
+            if (typeName != null)
+                return true;
+            return story.ResolveStruct (leftVar.path [0]) != null;
+        }
 
         public override void ResolveReferences (Story context)
         {

@@ -16,8 +16,12 @@ namespace Ink.Parsed
         public bool isNewTemporaryDeclaration { get; set; }
         public bool isStructField { get; set; }
         public bool isRefVar { get; set; }
-        /// <summary>When set, this variable/field holds a struct instance of this type.</summary>
+        /// <summary>When set, this variable/field holds a struct instance of this type. Use "dynamic" for anonymous empty dynamics.</summary>
         public string structTypeName { get; set; }
+        /// <summary>True when declared as <c>: dynamic</c> (anonymous empty dynamic).</summary>
+        public bool isAnonymousDynamic {
+            get { return structTypeName == "dynamic"; }
+        }
 
         public bool isDeclaration {
             get {
@@ -87,9 +91,12 @@ namespace Ink.Parsed
                 return container;
             }
 
-            // Typed temp without initializer → default instance
+            // Typed temp without initializer → default instance (or empty dynamic)
             if (expression == null && structTypeName != null) {
-                container.AddContent (new Runtime.StructCreateDefault (structTypeName));
+                if (isAnonymousDynamic)
+                    container.AddContent (new Runtime.StructCreateDefault (variableName, createEmptyDynamic: true));
+                else
+                    container.AddContent (new Runtime.StructCreateDefault (structTypeName));
             }
             // The expression's runtimeObject is actually another nested container
             else if( expression != null )
@@ -131,8 +138,8 @@ namespace Ink.Parsed
 
             // Initial VAR x = [intialValue] declaration, not re-assignment
             if (this.isGlobalDeclaration) {
-                if (isRefVar && structTypeName == null)
-                    Error ("REFVAR '" + variableName + "' requires a struct type, e.g. REFVAR " + variableName + ": TypeName = none");
+                // Untyped REFVAR is allowed (accepts struct or dynamic). Typed REFVAR : Type / : dynamic is fine.
+                // (Previously all REFVARs required a type.)
 
                 var variableReference = expression as VariableReference;
                 if (variableReference && !variableReference.isConstantReference && !variableReference.isListItemReference && !variableReference.isStructReference) {
@@ -140,6 +147,9 @@ namespace Ink.Parsed
                     if (structTypeName == null)
                         Error ("global variable assignments cannot refer to other variables, only literal values, constants and list items");
                 }
+
+                if (structTypeName != null && !isAnonymousDynamic && context.ResolveStruct (structTypeName) == null)
+                    Error ("Unknown struct/dynamic type '" + structTypeName + "'", this);
             }
 
             if (!this.isNewTemporaryDeclaration) {

@@ -2,18 +2,30 @@
 
 namespace Ink.Runtime
 {
+    public enum StructKind
+    {
+        Struct,
+        Dynamic
+    }
+
     /// <summary>
-    /// A live struct instance: concrete type plus name-keyed field storage.
+    /// A live struct/dynamic instance: concrete type, kind, field storage, and (for dynamics) instance method slots.
     /// </summary>
     public class StructObject
     {
         public string typeName { get; private set; }
+        public StructKind kind { get; private set; }
+        public bool isDynamic { get { return kind == StructKind.Dynamic; } }
         public Dictionary<string, Runtime.Object> storage { get; private set; }
+        /// <summary>Instance method slots (dynamic only): name → DivertTargetValue.</summary>
+        public Dictionary<string, Runtime.Object> methods { get; private set; }
 
-        public StructObject (string typeName, Dictionary<string, Runtime.Object> storage = null)
+        public StructObject (string typeName, Dictionary<string, Runtime.Object> storage = null, StructKind kind = StructKind.Struct, Dictionary<string, Runtime.Object> methods = null)
         {
             this.typeName = typeName;
+            this.kind = kind;
             this.storage = storage ?? new Dictionary<string, Runtime.Object> ();
+            this.methods = methods ?? new Dictionary<string, Runtime.Object> ();
         }
 
         public Runtime.Object GetField (string fieldName)
@@ -24,9 +36,56 @@ namespace Ink.Runtime
             return null;
         }
 
+        public bool HasField (string fieldName)
+        {
+            return storage.ContainsKey (fieldName);
+        }
+
         public void SetField (string fieldName, Runtime.Object value)
         {
             storage [fieldName] = value;
+        }
+
+        public bool RemoveField (string fieldName)
+        {
+            return storage.Remove (fieldName);
+        }
+
+        public DivertTargetValue GetMethod (string methodName)
+        {
+            Runtime.Object value;
+            if (methods != null && methods.TryGetValue (methodName, out value))
+                return value as DivertTargetValue;
+            return null;
+        }
+
+        public bool HasMethod (string methodName)
+        {
+            return methods != null && methods.ContainsKey (methodName);
+        }
+
+        public void SetMethod (string methodName, DivertTargetValue target)
+        {
+            if (methods == null)
+                methods = new Dictionary<string, Runtime.Object> ();
+            methods [methodName] = target;
+        }
+
+        public bool RemoveMethod (string methodName)
+        {
+            return methods != null && methods.Remove (methodName);
+        }
+
+        public bool HasSlot (string slotName)
+        {
+            return HasField (slotName) || HasMethod (slotName);
+        }
+
+        public bool RemoveSlot (string slotName)
+        {
+            bool removed = RemoveField (slotName);
+            removed |= RemoveMethod (slotName);
+            return removed;
         }
 
         public StructObject DeepCopy ()
@@ -35,7 +94,14 @@ namespace Ink.Runtime
             foreach (var kv in storage) {
                 copiedStorage [kv.Key] = DeepCopyValue (kv.Value);
             }
-            return new StructObject (typeName, copiedStorage);
+            Dictionary<string, Runtime.Object> copiedMethods = null;
+            if (methods != null && methods.Count > 0) {
+                copiedMethods = new Dictionary<string, Runtime.Object> ();
+                foreach (var kv in methods) {
+                    copiedMethods [kv.Key] = DeepCopyValue (kv.Value);
+                }
+            }
+            return new StructObject (typeName, copiedStorage, kind, copiedMethods);
         }
 
         public static Runtime.Object DeepCopyValue (Runtime.Object value)
@@ -55,12 +121,20 @@ namespace Ink.Runtime
             if (listVal != null)
                 return new ListValue (listVal.value);
 
-            // Scalars / pointers: Copy() is sufficient (REFVAR identity is StructRefValue above)
+            // Scalars / pointers / divert targets: Copy() is sufficient
             return value.Copy ();
         }
 
         /// <summary>
-        /// Create an instance seeded from a type descriptor's field defaults.
+        /// Create an empty anonymous dynamic instance (VAR x: dynamic).
+        /// </summary>
+        public static StructObject CreateEmptyDynamic (string typeName)
+        {
+            return new StructObject (typeName, null, StructKind.Dynamic, null);
+        }
+
+        /// <summary>
+        /// Create an instance seeded from a type descriptor's field defaults (and method slots for dynamics).
         /// </summary>
         public static StructObject CreateFromDefaults (StructDeclaration typeDesc)
         {
@@ -76,7 +150,16 @@ namespace Ink.Runtime
                     storage [field.name] = new IntValue (0);
                 }
             }
-            return new StructObject (typeDesc.name, storage);
+
+            Dictionary<string, Runtime.Object> instanceMethods = null;
+            if (typeDesc.kind == StructKind.Dynamic && typeDesc.methods != null) {
+                instanceMethods = new Dictionary<string, Runtime.Object> ();
+                foreach (var kv in typeDesc.methods) {
+                    instanceMethods [kv.Key] = new DivertTargetValue (new Path (kv.Value));
+                }
+            }
+
+            return new StructObject (typeDesc.name, storage, typeDesc.kind, instanceMethods);
         }
     }
 }

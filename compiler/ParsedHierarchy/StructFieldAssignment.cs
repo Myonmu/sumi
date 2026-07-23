@@ -15,6 +15,20 @@ namespace Ink.Parsed
         }
     }
 
+    /// <summary>Empty <c>[]</c> expression — used to remove a dynamic slot: <c>~ bag.x = []</c>.</summary>
+    public class VoidLiteral : Expression
+    {
+        public override void GenerateIntoContainer (Runtime.Container container)
+        {
+            container.AddContent (new Runtime.Void ());
+        }
+
+        public override string ToString ()
+        {
+            return "[]";
+        }
+    }
+
     /// <summary>
     /// Assignment to a struct field path: ~ Oswald.name = "x" or ~ party.scout = Oswald
     /// </summary>
@@ -90,10 +104,16 @@ namespace Ink.Parsed
             if (!story.TryResolveStructPathContext (path, this, out type, out start, reportErrors: false))
                 return false;
 
+            // Anonymous dynamic — no declared REFVAR layout
+            if (type == null)
+                return false;
+
             // Walk to the struct that owns the final field
             for (int i = start; i < path.Count - 1; i++) {
                 var field = type.FindField (path [i]);
                 if (field == null || string.IsNullOrEmpty (field.structTypeName))
+                    return false;
+                if (field.structTypeName == "dynamic")
                     return false;
                 type = story.ResolveStruct (field.structTypeName);
                 if (type == null)

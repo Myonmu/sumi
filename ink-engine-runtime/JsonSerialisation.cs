@@ -270,6 +270,8 @@ namespace Ink.Runtime
             if (structCreate) {
                 writer.WriteObjectStart ();
                 writer.WriteProperty ("snew", structCreate.typeName);
+                if (structCreate.createEmptyDynamic)
+                    writer.WriteProperty ("sdyn", 1);
                 writer.WriteObjectEnd ();
                 return;
             }
@@ -472,8 +474,13 @@ namespace Ink.Runtime
                     return new StructFieldGet ((string)propValue);
                 if (obj.TryGetValue ("sset", out propValue))
                     return new StructFieldSet ((string)propValue);
-                if (obj.TryGetValue ("snew", out propValue))
-                    return new StructCreateDefault ((string)propValue);
+                if (obj.TryGetValue ("snew", out propValue)) {
+                    var create = new StructCreateDefault ((string)propValue);
+                    object sdyn;
+                    if (obj.TryGetValue ("sdyn", out sdyn) && sdyn != null && !sdyn.Equals (0) && !sdyn.Equals (false))
+                        create.createEmptyDynamic = true;
+                    return create;
+                }
                 if (obj.TryGetValue ("scall", out propValue) || obj.TryGetValue ("sbase", out propValue)) {
                     bool isBase = obj.ContainsKey ("sbase");
                     string methodName = (string)(isBase ? obj ["sbase"] : obj ["scall"]);
@@ -810,6 +817,19 @@ namespace Ink.Runtime
         {
             writer.WriteObjectStart ();
             writer.WriteProperty ("^t", structVal.value.typeName);
+            if (structVal.value.isDynamic)
+                writer.WriteProperty ("^k", "dynamic");
+            if (structVal.value.methods != null && structVal.value.methods.Count > 0) {
+                writer.WritePropertyStart ("^m");
+                writer.WriteObjectStart ();
+                foreach (var kv in structVal.value.methods) {
+                    writer.WritePropertyStart (kv.Key);
+                    WriteRuntimeObject (writer, kv.Value);
+                    writer.WritePropertyEnd ();
+                }
+                writer.WriteObjectEnd ();
+                writer.WritePropertyEnd ();
+            }
             foreach (var kv in structVal.value.storage) {
                 writer.WritePropertyStart (kv.Key);
                 WriteRuntimeObject (writer, kv.Value);
@@ -821,18 +841,34 @@ namespace Ink.Runtime
         public static StructValue JTokenToStructValue (Dictionary<string, object> obj)
         {
             string typeName = (string)obj ["^t"];
+            var kind = StructKind.Struct;
+            object kindTok;
+            if (obj.TryGetValue ("^k", out kindTok) && kindTok != null && kindTok.ToString () == "dynamic")
+                kind = StructKind.Dynamic;
+
+            Dictionary<string, Runtime.Object> methods = null;
+            object methodsTok;
+            if (obj.TryGetValue ("^m", out methodsTok) && methodsTok is Dictionary<string, object>) {
+                methods = new Dictionary<string, Runtime.Object> ();
+                foreach (var kv in (Dictionary<string, object>)methodsTok)
+                    methods [kv.Key] = JTokenToRuntimeObject (kv.Value);
+            }
+
             var storage = new Dictionary<string, Runtime.Object> ();
             foreach (var kv in obj) {
-                if (kv.Key == "^t")
+                if (kv.Key == "^t" || kv.Key == "^k" || kv.Key == "^m")
                     continue;
                 storage [kv.Key] = JTokenToRuntimeObject (kv.Value);
             }
-            return new StructValue (new StructObject (typeName, storage));
+            return new StructValue (new StructObject (typeName, storage, kind, methods));
         }
 
         public static void WriteStructDefinition (SimpleJson.Writer writer, StructDeclaration def)
         {
             writer.WriteObjectStart ();
+
+            if (def.kind == StructKind.Dynamic)
+                writer.WriteProperty ("kind", "dynamic");
 
             writer.WritePropertyStart ("bases");
             writer.WriteArrayStart ();
@@ -909,6 +945,11 @@ namespace Ink.Runtime
                 var name = kv.Key;
                 var defJson = (Dictionary<string, object>)kv.Value;
 
+                var kind = StructKind.Struct;
+                object kindObj;
+                if (defJson.TryGetValue ("kind", out kindObj) && kindObj != null && kindObj.ToString () == "dynamic")
+                    kind = StructKind.Dynamic;
+
                 var bases = new List<string> ();
                 object basesObj;
                 if (defJson.TryGetValue ("bases", out basesObj)) {
@@ -923,12 +964,12 @@ namespace Ink.Runtime
                         var fieldJson = (Dictionary<string, object>)fieldTok;
                         string fieldName = (string)fieldJson ["name"];
                         string kindStr = fieldJson.ContainsKey ("kind") ? (string)fieldJson ["kind"] : "var";
-                        var kind = kindStr == "refvar" ? StructFieldKind.RefVar : StructFieldKind.Var;
+                        var fieldKind = kindStr == "refvar" ? StructFieldKind.RefVar : StructFieldKind.Var;
                         string typeName = fieldJson.ContainsKey ("type") ? (string)fieldJson ["type"] : null;
                         Runtime.Object defaultVal = null;
                         if (fieldJson.ContainsKey ("default"))
                             defaultVal = JTokenToRuntimeObject (fieldJson ["default"]);
-                        fields.Add (new StructFieldSlot (fieldName, kind, typeName, defaultVal));
+                        fields.Add (new StructFieldSlot (fieldName, fieldKind, typeName, defaultVal));
                     }
                 }
 
@@ -960,7 +1001,7 @@ namespace Ink.Runtime
                         stitchBaseCalls [m.Key] = (string)m.Value;
                 }
 
-                allDefs.Add (new StructDeclaration (name, bases, fields, methods, baseCalls, stitches, stitchBaseCalls));
+                allDefs.Add (new StructDeclaration (name, bases, fields, methods, baseCalls, stitches, stitchBaseCalls, kind));
             }
 
             return new StructDefinitionsOrigin (allDefs);

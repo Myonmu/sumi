@@ -1738,6 +1738,12 @@ namespace Ink.Runtime
                     return true;
                 }
                 var fieldVal = structObj.GetField (fieldGet.fieldName);
+                if (fieldVal == null) {
+                    // Method slots are not readable as fields; missing field is a runtime error
+                    Error ("Field '" + fieldGet.fieldName + "' not found on '" + structObj.typeName + "'");
+                    state.PushEvaluationStack (new IntValue (0));
+                    return true;
+                }
                 // Follow REFVAR
                 var refVal = fieldVal as StructRefValue;
                 if (refVal != null) {
@@ -1764,7 +1770,11 @@ namespace Ink.Runtime
             // Create default struct instance
             else if (contentObj is StructCreateDefault) {
                 var create = (StructCreateDefault)contentObj;
-                var instance = CreateDefaultStructInstance (create.typeName);
+                StructObject instance;
+                if (create.createEmptyDynamic)
+                    instance = StructObject.CreateEmptyDynamic (create.typeName);
+                else
+                    instance = CreateDefaultStructInstance (create.typeName);
                 state.PushEvaluationStack (new StructValue (instance));
                 return true;
             }
@@ -1788,10 +1798,19 @@ namespace Ink.Runtime
                 var func = (NativeFunctionCall)contentObj;
                 var funcParams = state.PopEvaluationStack (func.numberOfParameters);
 
-                // Struct polymorphism: needs structDefs for base walks
+                // Struct polymorphism / kind queries: needs structDefs for base walks
                 if (func.name == NativeFunctionCall.Is || func.name == NativeFunctionCall.Isnt) {
                     state.PushEvaluationStack (CallStructIsOperation (func.name, funcParams));
                     return true;
+                }
+
+                // Dynamic/struct slot membership (has / hasnt)
+                if (func.name == NativeFunctionCall.Has || func.name == NativeFunctionCall.Hasnt) {
+                    var hasResult = CallStructHasOperation (func.name, funcParams);
+                    if (hasResult != null) {
+                        state.PushEvaluationStack (hasResult);
+                        return true;
+                    }
                 }
 
                 var result = func.Call (funcParams);
@@ -1811,14 +1830,68 @@ namespace Ink.Runtime
             var leftInstance = ResolveStructInstance (parameters [0]);
             string queryTypeName = StructTypeNameForIsCheck (parameters [1]);
 
-            bool matches = leftInstance != null
-                && queryTypeName != null
-                && StructIsA (leftInstance.typeName, queryTypeName);
+            bool matches = false;
+            if (leftInstance != null && queryTypeName != null) {
+                if (queryTypeName == StructDeclaration.KindQueryDynamic)
+                    matches = leftInstance.isDynamic;
+                else if (queryTypeName == StructDeclaration.KindQueryStruct)
+                    matches = !leftInstance.isDynamic;
+                else
+                    matches = StructIsA (leftInstance.typeName, queryTypeName);
+            }
 
             if (opName == NativeFunctionCall.Isnt)
                 matches = !matches;
 
             return new BoolValue (matches);
+        }
+
+        /// <summary>
+        /// Handle <c>instance has slot</c> / <c>hasnt</c> when the left operand is a struct/dynamic.
+        /// Returns null if this is not a struct has operation (fall through to list has).
+        /// </summary>
+        Runtime.Object CallStructHasOperation (string opName, List<Runtime.Object> parameters)
+        {
+            if (parameters == null || parameters.Count != 2)
+                return null;
+
+            var leftInstance = ResolveStructInstance (parameters [0]);
+            if (leftInstance == null)
+                return null;
+
+            string slotName = null;
+            var strVal = parameters [1] as StringValue;
+            if (strVal != null)
+                slotName = strVal.value;
+            else {
+                // Allow divert target or other values only if string-like — otherwise not our op
+                return null;
+            }
+
+            bool hasSlot = InstanceHasSlot (leftInstance, slotName);
+            if (opName == NativeFunctionCall.Hasnt)
+                hasSlot = !hasSlot;
+            return new BoolValue (hasSlot);
+        }
+
+        bool InstanceHasSlot (StructObject instance, string slotName)
+        {
+            if (instance == null || slotName == null)
+                return false;
+            if (instance.HasSlot (slotName))
+                return true;
+            // Closed structs: also treat type-level methods as present
+            if (!instance.isDynamic && _structDefinitions != null) {
+                var def = _structDefinitions.GetDefinition (instance.typeName);
+                if (def != null) {
+                    if (def.HasField (slotName))
+                        return true;
+                    string path;
+                    if (def.TryGetMethodPath (slotName, out path))
+                        return true;
+                }
+            }
+            return false;
         }
 
         string StructTypeNameForIsCheck (Runtime.Object obj)
@@ -1831,7 +1904,7 @@ namespace Ink.Runtime
             if (structVal != null && structVal.value != null)
                 return structVal.value.typeName;
 
-            // Allow a type name string if ever pushed explicitly
+            // Allow a type name string if ever pushed explicitly (including kind query sentinels)
             var strVal = obj as StringValue;
             if (strVal != null)
                 return strVal.value;
@@ -1898,7 +1971,7 @@ namespace Ink.Runtime
 
         void SetStructField (Runtime.Object instanceObj, string fieldName, Runtime.Object valueToSet)
         {
-            // If instanceObj is a pointer (possibly a chain through a ref parameter), 
+            // If instanceObj is a pointer (possibly a chain through a ref parameter),
             // mutate the pointed-to struct in place
             var seen = 0;
             while (instanceObj is VariablePointerValue && seen++ < 8) {
@@ -1913,13 +1986,46 @@ namespace Ink.Runtime
                 return;
             }
 
+            var instance = structVal.value;
             StructDeclaration typeDesc = null;
             if (_structDefinitions != null)
-                typeDesc = _structDefinitions.GetDefinition (structVal.value.typeName);
+                typeDesc = _structDefinitions.GetDefinition (instance.typeName);
+
+            // Removal: Void (`[]`) clears the slot (dynamic only). Missing slot is a no-op.
+            if (valueToSet is Void) {
+                if (!instance.isDynamic) {
+                    Error ("Cannot remove slot '" + fieldName + "' on closed struct '" + instance.typeName + "'");
+                    return;
+                }
+                instance.RemoveSlot (fieldName);
+                return;
+            }
+
+            // Divert target → method slot (dynamic only; closed structs cannot retarget)
+            var divertTarget = valueToSet as DivertTargetValue;
+            if (divertTarget != null) {
+                if (!instance.isDynamic) {
+                    Error ("Cannot reassign method slot '" + fieldName + "' on closed struct '" + instance.typeName + "'");
+                    return;
+                }
+                instance.RemoveField (fieldName);
+                instance.SetMethod (fieldName, (DivertTargetValue)divertTarget.Copy ());
+                return;
+            }
 
             StructFieldSlot slot = null;
             if (typeDesc != null)
                 typeDesc.TryGetField (fieldName, out slot);
+
+            // Closed struct: only declared fields may be set
+            if (!instance.isDynamic) {
+                bool allowed = instance.HasField (fieldName)
+                    || (typeDesc != null && typeDesc.HasField (fieldName));
+                if (!allowed) {
+                    Error ("Cannot add field '" + fieldName + "' on closed struct '" + instance.typeName + "'");
+                    return;
+                }
+            }
 
             Runtime.Object stored;
             if (slot != null && slot.kind == StructFieldKind.RefVar) {
@@ -1931,6 +2037,26 @@ namespace Ink.Runtime
                     stored = valueToSet; // shouldn't happen for refvar; keep as-is for recovery
                 else
                     stored = new StructRefValue (null);
+
+                // Typed REFVAR: dynamic-only or struct-only checks
+                if (stored is StructRefValue) {
+                    var refStored = (StructRefValue)stored;
+                    if (!string.IsNullOrEmpty (refStored.targetName) && slot.typeName != null) {
+                        var targetVal = state.variablesState.GetVariableWithName (refStored.targetName) as StructValue;
+                        if (targetVal?.value != null) {
+                            if (slot.typeName == "dynamic") {
+                                if (!targetVal.value.isDynamic)
+                                    Error ("REFVAR '" + fieldName + "' typed as dynamic cannot reference closed struct '" + targetVal.value.typeName + "'");
+                            } else if (!targetVal.value.isDynamic) {
+                                if (!StructIsA (targetVal.value.typeName, slot.typeName))
+                                    Error ("REFVAR '" + fieldName + "' expects type '" + slot.typeName + "'");
+                            } else {
+                                // Struct-typed REFVAR rejecting dynamics
+                                Error ("REFVAR '" + fieldName + "' typed as '" + slot.typeName + "' cannot reference a dynamic");
+                            }
+                        }
+                    }
+                }
             } else if (valueToSet is StructValue) {
                 stored = ((StructValue)valueToSet).Copy ();
             } else {
@@ -1938,11 +2064,14 @@ namespace Ink.Runtime
             }
 
             // Same as global/temp list assign: empty list keeps prior origin names
-            var oldFieldValue = structVal.value.GetField (fieldName);
+            var oldFieldValue = instance.GetField (fieldName);
             ListValue.RetainListOriginsForAssignment (oldFieldValue, stored);
 
-            structVal.value.SetField (fieldName, stored);
-            // In-place mutation of the StructObject is enough; no re-Assign needed.
+            // Dynamic: assigning a value clears a same-named method slot
+            if (instance.isDynamic)
+                instance.RemoveMethod (fieldName);
+
+            instance.SetField (fieldName, stored);
         }
 
         StructObject CreateDefaultStructInstance (string typeName, HashSet<string> creating = null)
@@ -1966,6 +2095,8 @@ namespace Ink.Runtime
                 } else if (field.typeName != null) {
                     if (field.defaultValue is StructValue)
                         storage [field.name] = StructObject.DeepCopyValue (field.defaultValue);
+                    else if (field.typeName == "dynamic")
+                        storage [field.name] = new StructValue (StructObject.CreateEmptyDynamic (field.name));
                     else
                         storage [field.name] = new StructValue (CreateDefaultStructInstance (field.typeName, creating));
                 } else if (field.defaultValue != null) {
@@ -1974,8 +2105,16 @@ namespace Ink.Runtime
                     storage [field.name] = new IntValue (0);
                 }
             }
+
+            Dictionary<string, Runtime.Object> instanceMethods = null;
+            if (typeDesc.kind == StructKind.Dynamic && typeDesc.methods != null) {
+                instanceMethods = new Dictionary<string, Runtime.Object> ();
+                foreach (var kv in typeDesc.methods)
+                    instanceMethods [kv.Key] = new DivertTargetValue (new Path (kv.Value));
+            }
+
             creating.Remove (typeName);
-            return new StructObject (typeName, storage);
+            return new StructObject (typeName, storage, typeDesc.kind, instanceMethods);
         }
 
         void PerformStructMethodCall (StructMethodCall call)
@@ -1994,10 +2133,20 @@ namespace Ink.Runtime
                     Error ("Cannot call method '" + call.methodName + "' on non-struct / none");
                     return;
                 }
-                StructDeclaration typeDesc = _structDefinitions?.GetDefinition (instance.typeName);
-                if (typeDesc == null || !typeDesc.TryGetMethodPath (call.methodName, out pathStr)) {
-                    Error ("Method '" + call.methodName + "' not found on struct '" + instance.typeName + "'");
-                    return;
+
+                if (instance.isDynamic) {
+                    var methodTarget = instance.GetMethod (call.methodName);
+                    if (methodTarget == null || methodTarget.targetPath == null) {
+                        Error ("Method '" + call.methodName + "' not found on dynamic '" + instance.typeName + "'");
+                        return;
+                    }
+                    pathStr = methodTarget.targetPath.componentsString;
+                } else {
+                    StructDeclaration typeDesc = _structDefinitions?.GetDefinition (instance.typeName);
+                    if (typeDesc == null || !typeDesc.TryGetMethodPath (call.methodName, out pathStr)) {
+                        Error ("Method '" + call.methodName + "' not found on struct '" + instance.typeName + "'");
+                        return;
+                    }
                 }
             }
 
@@ -2202,11 +2351,17 @@ namespace Ink.Runtime
             if (structObj == null)
                 throw new System.Exception ("EvaluateMethod requires a struct instance");
 
-            string pathStr;
-            var typeDesc = _structDefinitions?.GetDefinition (structObj.typeName);
-            if (typeDesc == null || !typeDesc.TryGetMethodPath (methodName, out pathStr))
-                throw new System.Exception ("Method '" + methodName + "' not found on '" + structObj.typeName + "'");
-
+            string pathStr = null;
+            if (structObj.isDynamic) {
+                var methodTarget = structObj.GetMethod (methodName);
+                if (methodTarget == null || methodTarget.targetPath == null)
+                    throw new System.Exception ("Method '" + methodName + "' not found on dynamic '" + structObj.typeName + "'");
+                pathStr = methodTarget.targetPath.componentsString;
+            } else {
+                var typeDesc = _structDefinitions?.GetDefinition (structObj.typeName);
+                if (typeDesc == null || !typeDesc.TryGetMethodPath (methodName, out pathStr))
+                    throw new System.Exception ("Method '" + methodName + "' not found on '" + structObj.typeName + "'");
+            }
             var funcContainer = ContentAtPath (new Path (pathStr)).container;
             if (funcContainer == null)
                 throw new System.Exception ("Method path not found: " + pathStr);

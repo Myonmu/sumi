@@ -197,7 +197,7 @@ namespace Ink
 
             // - Since we allow numbers at the start of variable names, variable names are checked before literals
             // - Function calls before variable names in case we see parentheses
-            var expr = OneOf (ExpressionList, ExpressionParen, ExpressionFunctionCall, ExpressionVariableName, ExpressionLiteral) as Expression;
+            var expr = OneOf (ExpressionList, ExpressionVoidLiteral, ExpressionParen, ExpressionFunctionCall, ExpressionVariableName, ExpressionLiteral) as Expression;
 
             // Only recurse immediately if we have one of the (usually optional) unary ops
             if (expr == null && prefixOp != null) {
@@ -242,6 +242,26 @@ namespace Ink
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// Empty <c>[]</c> — used to remove a dynamic slot: <c>~ bag.x = []</c>.
+        /// (Empty <c>()</c> remains an empty list literal.)
+        /// </summary>
+        protected Expression ExpressionVoidLiteral()
+        {
+            var ruleId = BeginRule ();
+            Whitespace ();
+            if (ParseString ("[") == null) {
+                FailRule (ruleId);
+                return null;
+            }
+            Whitespace ();
+            if (ParseString ("]") == null) {
+                FailRule (ruleId);
+                return null;
+            }
+            return (Expression) SucceedRule (ruleId, new VoidLiteral ());
         }
 
 		protected Expression ExpressionLiteral()
@@ -382,8 +402,14 @@ namespace Ink
 
             List<Identifier> path = Interleave<Identifier> (IdentifierWithMetadata, Exclude (Spaced (String ("."))));
 
-            // Allow 'self' as a receiver (Python-style); other reserved keywords stay invalid as names.
-            if (path == null || (Story.IsReservedKeyword (path[0].name) && path[0].name != "self"))
+            // Allow 'self' as a receiver (Python-style); allow 'dynamic'/'struct' for is/isnt kind queries.
+            // Other reserved keywords stay invalid as names.
+            if (path == null)
+                return null;
+            if (Story.IsReservedKeyword (path[0].name)
+                && path[0].name != "self"
+                && path[0].name != "dynamic"
+                && path[0].name != "struct")
                 return null;
 
             return new VariableReference (path);

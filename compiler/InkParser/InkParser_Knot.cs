@@ -25,6 +25,7 @@ namespace Ink
         protected class StructDecl: KnotLikeDecl
         {
             public List<Identifier> baseTypes;
+            public bool isDynamic;
         }
 
 		protected Knot KnotDefinition()
@@ -106,7 +107,7 @@ namespace Ink
 
             var content = ParseStructBodyContent ();
 
-            return new StructDeclaration (knotDecl.name, content, structDecl.baseTypes);
+            return new StructDeclaration (knotDecl.name, content, structDecl.baseTypes, structDecl.isDynamic);
         }
 
         /// <summary>
@@ -336,10 +337,13 @@ namespace Ink
 
             const string functionKeyword = "function";
             const string structKeyword = "struct";
+            const string dynamicKeyword = "dynamic";
             bool isFunc = identifier?.name == functionKeyword;
             bool isStruct = identifier?.name == structKeyword;
-            var hint = isFunc ? functionKeyword : isStruct ? structKeyword : "knot";
-            if (isFunc || isStruct) {
+            bool isDynamic = identifier?.name == dynamicKeyword;
+            bool isStructLike = isStruct || isDynamic;
+            var hint = isFunc ? functionKeyword : isDynamic ? dynamicKeyword : isStruct ? structKeyword : "knot";
+            if (isFunc || isStructLike) {
                 Expect (Whitespace, $"whitespace after the '{hint}' keyword");
                 knotName = Parse(IdentifierWithMetadata);
             }else {
@@ -354,7 +358,7 @@ namespace Ink
             Whitespace ();
             List<FlowBase.Argument> parameterNames = null; 
             List<Parsed.Identifier> baseTypeIdentifiers = null;
-            if (isStruct)
+            if (isStructLike)
             {
                 baseTypeIdentifiers = Parse(StructBaseType);
             }
@@ -368,12 +372,13 @@ namespace Ink
             // Optional equals after name
             Parse(KnotTitleEquals);
 
-            if (isStruct)
+            if (isStructLike)
             {
                 return new StructDecl()
                 {
                     name = knotName,
-                    baseTypes = baseTypeIdentifiers
+                    baseTypes = baseTypeIdentifiers,
+                    isDynamic = isDynamic
                 };
             }
             return new FlowDecl () { name = knotName, arguments = parameterNames, isFunction = isFunc };

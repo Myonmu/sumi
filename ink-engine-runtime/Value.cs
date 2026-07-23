@@ -359,7 +359,9 @@ namespace Ink.Runtime
 
         public override string ToString ()
         {
-            return value == null ? "null" : ("struct(" + value.typeName + ")");
+            if (value == null)
+                return "null";
+            return (value.isDynamic ? "dynamic(" : "struct(") + value.typeName + ")";
         }
     }
 

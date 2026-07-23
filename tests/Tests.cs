@@ -4991,6 +4991,176 @@ VAR fight: Scene
                 "Expected method-divert error, got: " + string.Join(" | ", _errorMessages));
         }
 
+        [Test()]
+        public void TestDynamicNamedAddRemoveHasAndKind()
+        {
+            var story = CompileString(@"
+=== dynamic Bag ===
+VAR score = 0
+= function Bonus() =
+~ return self.score + 1
+===
+VAR bag: Bag
+
+-> start
+=== start ===
+{bag is dynamic}
+{bag is struct}
+{bag is Bag}
+{bag has score}
+{bag hasnt extra}
+~ bag.extra = 5
+{bag has extra}
+{bag.extra}
+~ bag.extra = []
+{bag hasnt extra}
+~ bag.score = 10
+{bag.Bonus()}
+-> END
+");
+            Assert.AreEqual("true\nfalse\ntrue\ntrue\ntrue\ntrue\n5\ntrue\n11\n", story.ContinueMaximally());
+        }
+
+        [Test()]
+        public void TestDynamicAnonymousEmptyAndMethodRetarget()
+        {
+            var story = CompileString(@"
+=== dynamic Actor ===
+VAR name = ""a""
+= function Speak() =
+{self.name} speaks
+~ return
+= function Shout() =
+{self.name} shouts
+~ return
+===
+VAR bag: dynamic
+VAR actor: Actor
+
+-> start
+=== start ===
+{bag is dynamic}
+{bag isnt struct}
+~ bag.x = 3
+{bag.x}
+{bag has x}
+~ bag.Speak = -> Actor.static.Speak
+~ bag.name = ""bag""
+~ bag.Speak()
+~ actor.Speak = -> Actor.static.Shout
+~ actor.name = ""hero""
+~ actor.Speak()
+-> END
+");
+            Assert.AreEqual("true\ntrue\n3\ntrue\nbag speaks\nhero shouts\n", story.ContinueMaximally());
+        }
+
+        [Test()]
+        public void TestDynamicInheritsStructAndStructCannotInheritDynamic()
+        {
+            var story = CompileString(@"
+=== struct Character ===
+VAR name = ""anon""
+
+=== dynamic Hero: Character ===
+VAR power = 1
+===
+VAR h: Hero
+
+-> start
+=== start ===
+{h is Character}
+{h is dynamic}
+{h.name}
+{h.power}
+-> END
+");
+            Assert.AreEqual("true\ntrue\nanon\n1\n", story.ContinueMaximally());
+
+            CompileString(@"
+=== dynamic Bag ===
+VAR x = 1
+
+=== struct Bad: Bag ===
+VAR y = 2
+===
+", testingErrors: true);
+            Assert.IsTrue(_errorMessages.Exists(m => m.Contains("cannot inherit dynamic")),
+                "Expected struct-cannot-inherit-dynamic error, got: " + string.Join(" | ", _errorMessages));
+        }
+
+        [Test()]
+        public void TestDynamicRefVarAndClosedStructSlotErrors()
+        {
+            var story = CompileString(@"
+=== struct Character ===
+VAR name = ""anon""
+
+=== dynamic Bag ===
+VAR n = 0
+===
+REFVAR anyRef = none
+REFVAR dynRef: dynamic = none
+VAR c: Character
+VAR b: Bag
+
+-> start
+=== start ===
+~ anyRef = c
+~ anyRef = b
+~ dynRef = b
+{dynRef is dynamic}
+{c is struct}
+-> END
+");
+            Assert.AreEqual("true\ntrue\n", story.ContinueMaximally());
+
+            // Closed struct rejects unknown fields at compile time
+            CompileString(@"
+=== struct Character ===
+VAR name = ""anon""
+===
+VAR c: Character
+
+-> start
+=== start ===
+~ c.extra = 1
+-> END
+", testingErrors: true);
+            Assert.IsTrue(_errorMessages.Exists(m => m.Contains("no field named") || m.Contains("Cannot add field")),
+                "Expected closed-struct unknown-field error, got: " + string.Join(" | ", _errorMessages));
+        }
+
+        [Test()]
+        public void TestDynamicSaveLoadRoundTrip()
+        {
+            var story = CompileString(@"
+=== dynamic Bag ===
+VAR score = 1
+= function Bonus() =
+~ return self.score + 1
+===
+VAR bag: Bag
+
+-> start
+=== start ===
+~ bag.score = 7
+~ bag.extra = 2
+{bag.Bonus()}
+-> END
+");
+            Assert.AreEqual("8\n", story.ContinueMaximally());
+
+            var json = story.state.ToJson();
+            story.state.LoadJson(json);
+            var bag = story.variablesState.GetVariableWithName("bag") as Ink.Runtime.StructValue;
+            Assert.IsNotNull(bag);
+            Assert.IsTrue(bag.value.isDynamic);
+            Assert.AreEqual("Bag", bag.value.typeName);
+            Assert.IsTrue(bag.value.HasField("extra"));
+            Assert.IsTrue(bag.value.HasMethod("Bonus"));
+        }
+
         private class TestWarningException : System.Exception
         { }
     }

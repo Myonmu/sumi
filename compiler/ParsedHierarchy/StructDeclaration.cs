@@ -8,6 +8,7 @@ namespace Ink.Parsed
         public Identifier identifier { get; set; }
         public string name => identifier?.name;
         public List<Identifier> baseTypes { get; protected set; }
+        public bool isDynamic { get; set; }
 
         public List<VariableAssignment> ownFields { get; private set; }
         public List<Stitch> ownMethods { get; private set; }
@@ -41,10 +42,11 @@ namespace Ink.Parsed
             public List<FlowBase.Argument> authorArguments;
         }
 
-        public StructDeclaration (Identifier structName, List<Object> topLevelObjects, List<Identifier> baseTypes)
+        public StructDeclaration (Identifier structName, List<Object> topLevelObjects, List<Identifier> baseTypes, bool isDynamic = false)
         {
             identifier = structName;
             this.baseTypes = baseTypes ?? new List<Identifier> ();
+            this.isDynamic = isDynamic;
 
             ownFields = new List<VariableAssignment> ();
             ownMethods = new List<Stitch> ();
@@ -222,6 +224,12 @@ namespace Ink.Parsed
                 StructDeclaration baseStruct;
                 if (!allStructs.TryGetValue (baseName, out baseStruct)) {
                     Error ("Unknown base struct '" + baseName + "'", this);
+                    continue;
+                }
+
+                // struct cannot inherit dynamic; dynamic may inherit struct or dynamic
+                if (!isDynamic && baseStruct.isDynamic) {
+                    Error ("Struct '" + name + "' cannot inherit dynamic '" + baseName + "'", this);
                     continue;
                 }
 
@@ -410,7 +418,8 @@ namespace Ink.Parsed
                 new Dictionary<string, string> (flattenedMethods),
                 new Dictionary<string, string> (baseCallPaths),
                 stitchPaths,
-                new Dictionary<string, string> (stitchBaseCallPaths)
+                new Dictionary<string, string> (stitchBaseCallPaths),
+                isDynamic ? Runtime.StructKind.Dynamic : Runtime.StructKind.Struct
             );
             return runtimeStructDef;
         }
@@ -431,7 +440,7 @@ namespace Ink.Parsed
         }
 
         public override string typeName {
-            get { return "Struct"; }
+            get { return isDynamic ? "Dynamic" : "Struct"; }
         }
     }
 }

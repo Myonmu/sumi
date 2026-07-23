@@ -650,6 +650,8 @@ namespace Ink.Parsed
             if (varDecl.expression != null) {
                 varDecl.expression.GenerateIntoContainer (container);
                 // Deep-copy on assign handled by VariablesState for StructValue
+            } else if (varDecl.isAnonymousDynamic) {
+                container.AddContent (new Runtime.StructCreateDefault (varDecl.variableName, createEmptyDynamic: true));
             } else {
                 container.AddContent (new Runtime.StructCreateDefault (varDecl.structTypeName));
             }
@@ -731,6 +733,15 @@ namespace Ink.Parsed
             return null;
         }
 
+        /// <summary>True when the type name is the anonymous <c>dynamic</c> keyword or a named dynamic declaration.</summary>
+        public bool IsDynamicTypeName (string typeName)
+        {
+            if (typeName == "dynamic")
+                return true;
+            var decl = ResolveStruct (typeName);
+            return decl != null && decl.isDynamic;
+        }
+
         /// <summary>True if actualType is expectedType or inherits from it.</summary>
         public bool StructTypeIsCompatible (string actualTypeName, string expectedTypeName)
         {
@@ -738,6 +749,11 @@ namespace Ink.Parsed
                 return false;
             if (actualTypeName == expectedTypeName)
                 return true;
+            // Anonymous / typed dynamic is only compatible with dynamic
+            if (expectedTypeName == "dynamic")
+                return IsDynamicTypeName (actualTypeName);
+            if (actualTypeName == "dynamic")
+                return expectedTypeName == "dynamic";
 
             var actual = ResolveStruct (actualTypeName);
             if (actual == null)
@@ -851,6 +867,12 @@ namespace Ink.Parsed
 
             var typeName = ResolveStructTypeNameForName (root, fromNode);
             if (typeName != null) {
+                if (typeName == "dynamic") {
+                    // Anonymous empty dynamic — no structDefs entry; soft member access
+                    type = null;
+                    memberStartIndex = 1;
+                    return true;
+                }
                 type = ResolveStruct (typeName);
                 if (type == null) {
                     if (reportErrors)
@@ -880,6 +902,10 @@ namespace Ink.Parsed
                 return;
             }
 
+            // Anonymous dynamic or named dynamic: no compile-time field errors
+            if (type == null || type.isDynamic)
+                return;
+
             if (start >= path.Count) {
                 // Bare type / self / Type.static with no field — ok as instance reference elsewhere
                 return;
@@ -897,11 +923,15 @@ namespace Ink.Parsed
                         fromNode.Error ("Cannot access members through '" + path [i] + "' because it is not a struct-typed field", fromNode);
                         return;
                     }
+                    if (field.structTypeName == "dynamic")
+                        return; // remaining access is soft
                     var next = ResolveStruct (field.structTypeName);
                     if (next == null) {
                         fromNode.Error ("Unknown struct type '" + field.structTypeName + "' on field '" + path [i] + "'", fromNode);
                         return;
                     }
+                    if (next.isDynamic)
+                        return;
                     typeCursor = next;
                 }
             }
@@ -926,6 +956,10 @@ namespace Ink.Parsed
                 return;
             }
 
+            // Anonymous or named dynamic: soft method names
+            if (type == null || type.isDynamic)
+                return;
+
             // Intermediate fields before the method name
             int methodIndex = pathIncludingMethod.Count - 1;
             if (start > methodIndex) {
@@ -944,11 +978,15 @@ namespace Ink.Parsed
                     fromNode.Error ("Cannot call methods through '" + pathIncludingMethod [i] + "' because it is not a struct-typed field", fromNode);
                     return;
                 }
+                if (field.structTypeName == "dynamic")
+                    return;
                 var next = ResolveStruct (field.structTypeName);
                 if (next == null) {
                     fromNode.Error ("Unknown struct type '" + field.structTypeName + "' on field '" + pathIncludingMethod [i] + "'", fromNode);
                     return;
                 }
+                if (next.isDynamic)
+                    return;
                 typeCursor = next;
             }
 
@@ -1154,6 +1192,7 @@ namespace Ink.Parsed
             case "temp":
             case "LIST":
             case "struct":
+            case "dynamic":
             case "function":
             case "REFVAR":
             case "self":

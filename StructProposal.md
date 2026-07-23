@@ -256,6 +256,22 @@ Attempting to form `Character.guest` for a temp is a compile error (no such glob
 
 ---
 
+## Dynamics (open slots)
+
+`dynamic` is the open-slot counterpart to closed `struct`:
+
+- Compile-time `structDefs` layout/vtable remains immutable defaults.
+- Live instances (including the type-named default global) may **add**, **remove** (`~ x.slot = []`), and **retarget** method slots (`~ x.M = -> Type.static.M`).
+- `VAR x: dynamic` creates an empty dynamic with `typeName == "x"`.
+- Soft compile-time member checks; missing reads/calls are runtime errors.
+- Kind queries: `is dynamic` / `is struct`. Slot tests: `has` / `hasnt`.
+- Inheritance: dynamic may inherit struct (or dynamic); struct may **not** inherit dynamic.
+- Empty `()` remains an empty **list**; slot removal uses `[]`.
+
+See *Writing with Ink* Part 6 § Dynamics for author-facing examples.
+
+---
+
 ## VTables and type layout
 
 Each struct type has a compile-time **type descriptor** with two parallel tables built by the same linearization pass:

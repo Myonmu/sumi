@@ -253,10 +253,14 @@ namespace Ink.Parsed
                 return false;
 
             // Variable may be registered; treat dotted calls on variables as struct methods
-            // when the story defines structs (ResolveReferences validates the member).
-            if (story.structs != null && story.structs.Count > 0
-                && story.ResolveVariableWithName (pathNames [0], fromNode).found)
-                return true;
+            // when the story defines structs/dynamics, or the variable is typed as dynamic/struct.
+            if (story.ResolveVariableWithName (pathNames [0], fromNode).found) {
+                if (story.structs != null && story.structs.Count > 0)
+                    return true;
+                var typeName = story.ResolveStructTypeNameForName (pathNames [0], fromNode);
+                if (typeName != null)
+                    return true;
+            }
 
             return false;
         }

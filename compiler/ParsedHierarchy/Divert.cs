@@ -187,8 +187,11 @@ namespace Ink.Parsed
             if (storyContext == null)
                 return false;
 
-            // Diverting to a function method is invalid — intercept before variable divert.
+            // Diverting to a function method is invalid as flow — but storing -> Type.static.Method
+            // as a DivertTargetValue (function pointer for dynamic method slots) is allowed.
             if (storyContext.IsStructMethodDivertPath (pathNames, this)) {
+                if (this.parent is DivertTarget)
+                    return false;
                 Error ("Method '" + pathNames [pathNames.Count - 1] + "' can't be diverted to. It can only be called as a function");
                 result = Runtime.ControlCommand.Done ();
                 return true;
@@ -350,6 +353,30 @@ namespace Ink.Parsed
                 }
 
                 targetContent = target.ResolveFromContext (this);
+
+                // Type.static.Method — struct methods are named content, not flow-path children
+                if (targetContent == null && target != null && target.numberOfComponents >= 3
+                    && target.components [1]?.name == "static") {
+                    var typeName = target.components [0]?.name;
+                    var methodName = target.components [target.numberOfComponents - 1]?.name;
+                    var structDecl = story?.ResolveStruct (typeName);
+                    if (structDecl != null && methodName != null) {
+                        string methodPath;
+                        if (structDecl.flattenedMethods != null
+                            && structDecl.flattenedMethods.TryGetValue (methodName, out methodPath)) {
+                            var declaringTypeName = methodPath.Split ('.') [0];
+                            var declaring = story.ResolveStruct (declaringTypeName) ?? structDecl;
+                            if (declaring.ownMethods != null) {
+                                foreach (var m in declaring.ownMethods) {
+                                    if (m.name == methodName) {
+                                        targetContent = m;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 

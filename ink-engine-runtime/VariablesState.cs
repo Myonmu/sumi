@@ -201,6 +201,21 @@ namespace Ink.Runtime
             var fieldName = parts [parts.Length - 1];
             var existing = current.value.GetField (fieldName);
 
+            if (value is DivertTargetValue && current.value.isDynamic) {
+                current.value.RemoveField (fieldName);
+                current.value.SetMethod (fieldName, (DivertTargetValue)((DivertTargetValue)value).Copy ());
+                if (variableChangedEvent != null) {
+                    var rootVal = GetRawGlobalForPath (rootName);
+                    if (rootVal != null)
+                        variableChangedEvent (rootName, rootVal);
+                }
+                return;
+            }
+
+            if (!current.value.isDynamic && !current.value.HasField (fieldName) && !(existing is StructRefValue)) {
+                throw new StoryException ("Cannot add field '" + fieldName + "' on closed struct '" + current.value.typeName + "'");
+            }
+
             Runtime.Object stored;
             if (existing is StructRefValue) {
                 // Rebind REFVAR: string = global name, null = none
@@ -225,6 +240,8 @@ namespace Ink.Runtime
                 }
             }
 
+            if (current.value.isDynamic)
+                current.value.RemoveMethod (fieldName);
             current.value.SetField (fieldName, stored);
 
             // Notify observers interested in the root global

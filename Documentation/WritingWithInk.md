@@ -3611,16 +3611,47 @@ Rebinding `party.scout` or `active` changes which global is referred to; it does
 
 `REFVAR` targets must be globals the engine (and save system) can resolve by name. Prefer `REFVAR` when several structs should share the same live instance.
 
-## 6) Summary
+## 6) Dynamics (open slots)
 
-- Define types with `=== struct Name ===` (optional `: Base1, Base2`).
+A **dynamic** is like a struct whose instance can grow and shrink at runtime. The compile-time layout in `structDefs` stays fixed; the live instance (including the type-named default global) can add, remove, and retarget slots.
+
+	=== dynamic Bag ===
+	VAR score = 0
+	= function Bonus() =
+	~ return self.score + 1
+	===
+	VAR bag: Bag
+	VAR scratch: dynamic
+
+	~ bag.extra = 5
+	{bag has extra}
+	~ bag.extra = []
+	{bag hasnt extra}
+
+	~ bag.Bonus = -> Bag.static.Bonus
+	~ scratch.x = 1
+
+Rules:
+
+- Declare with `=== dynamic Name ===` (may inherit `struct` or `dynamic` bases). A `struct` **cannot** inherit a `dynamic`.
+- `VAR x: dynamic` / `temp x: dynamic` creates an empty dynamic whose type identity is the variable name (`x`).
+- Dot access on a dynamic does **not** fail at compile time. Reading or calling a missing slot is a **runtime** error; assigning a new name creates that slot.
+- Remove a slot with `~ instance.slot = []` (empty `()` remains an empty **list** literal).
+- Method slots hold divert targets to compiled functions (`~ d.M = -> Type.static.M`). Calls still push `self`.
+- `{x is dynamic}` / `{x is struct}` test kind (not inheritance). `{x is SomeType}` still walks bases.
+- `{x has slot}` / `{x hasnt slot}` test whether a field or method slot is present.
+- `REFVAR r: dynamic` only accepts dynamics; untyped `REFVAR r` accepts struct or dynamic; typed `REFVAR r: SomeStruct` rejects dynamics. Adding/removing slots on a closed struct is an error.
+
+## 7) Summary
+
+- Define closed types with `=== struct Name ===` and open types with `=== dynamic Name ===`.
 - Fields and globals: `VAR` / `REFVAR` first; then `= function Method() =` methods and/or `= stitch` narrative stitches.
-- End the struct body with `===` (3+ equals) before top-level globals, or continue with another knot/struct title.
-- Instantiate with `VAR x: Type` or `temp x: Type` (optional `= initializer`).
+- End the body with `===` (3+ equals) before top-level globals, or continue with another knot/struct/dynamic title.
+- Instantiate with `VAR x: Type`, `VAR x: dynamic`, or `temp …` (optional `= initializer`).
 - Inside methods/stitches use `self.field` / `self.Method()` (and `base.Method()` / `-> base.stitch` when overriding); bare names are globals, not members.
 - Divert/tunnel into stitches: `-> instance.stitch(args)` / `-> instance.stitch(args) ->`.
 - Value fields/`VAR`s copy; `REFVAR` fields and globals rebind to globals (or `none`).
-- `is` / `isnt` test runtime type against a struct type (including inheritance).
+- `is` / `isnt` test runtime type (and `is dynamic` / `is struct` for kind).
 - Struct type names are not divert targets; methods are call-only; stitches are divert-only.
 
 For reading and writing struct state from game code, see [Working with structs](RunningYourInk.md#working-with-structs) in *Running your ink*.

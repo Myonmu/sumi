@@ -106,21 +106,27 @@ namespace Ink.Runtime
     /// <summary>
     /// Push a deep copy of the default instance for a struct type (by type name on stack as StringValue),
     /// or create from type name stored on this instruction.
+    /// When <see cref="createEmptyDynamic"/> is true, creates an empty dynamic with <see cref="typeName"/>
+    /// as its type identity (VAR x: dynamic → typeName = "x").
     /// </summary>
     public class StructCreateDefault : Runtime.Object
     {
         public string typeName { get; set; }
+        public bool createEmptyDynamic { get; set; }
 
-        public StructCreateDefault (string typeName)
+        public StructCreateDefault (string typeName, bool createEmptyDynamic = false)
         {
             this.typeName = typeName;
+            this.createEmptyDynamic = createEmptyDynamic;
         }
 
         public StructCreateDefault () {}
 
         public override string ToString ()
         {
-            return "StructCreateDefault(" + typeName + ")";
+            return createEmptyDynamic
+                ? "StructCreateEmptyDynamic(" + typeName + ")"
+                : "StructCreateDefault(" + typeName + ")";
         }
     }
 }

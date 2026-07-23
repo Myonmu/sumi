@@ -107,8 +107,8 @@ namespace Ink
                 var definition = Expect (Expression, "initial value for ");
                 expr = definition as Parsed.Expression;
 
-                if (expr && structTypeName == null) {
-                    if (!(expr is Number || expr is StringExpression || expr is DivertTarget || expr is VariableReference || expr is List || expr is FunctionCall)) {
+                if (expr && structTypeName == null && !isRefVar) {
+                    if (!(expr is Number || expr is StringExpression || expr is DivertTarget || expr is VariableReference || expr is List || expr is FunctionCall || expr is NoneLiteral)) {
                         Error ("initial value for a variable must be a number, constant, list or divert target");
                     }
 

@@ -140,6 +140,9 @@ namespace Ink.Parsed
                     foreach(var arg in targetFlow.arguments) {
                         if(arg.isByReference)
                         {
+                            // Struct methods always take implicit ref self; allowed as dynamic method pointers
+                            if (arg.identifier?.name == "self" && targetFlow.parent is StructDeclaration)
+                                continue;
                             Error("Can't store a divert target to a knot or function that has by-reference arguments ('"+targetFlow.identifier+"' has 'ref "+arg.identifier+"').");
                         }
                     }

@@ -12,7 +12,7 @@ namespace Ink.Runtime
     {
         public string name;
         public StructFieldKind kind;
-        /// <summary>Struct type name if this field is struct-typed; otherwise null.</summary>
+        /// <summary>Struct type name if this field is struct-typed; otherwise null. Use "dynamic" for dynamic-typed REFVAR.</summary>
         public string typeName;
         public Runtime.Object defaultValue;
 
@@ -26,11 +26,17 @@ namespace Ink.Runtime
     }
 
     /// <summary>
-    /// Compile-time / story JSON type descriptor for a struct.
+    /// Compile-time / story JSON type descriptor for a struct or dynamic.
     /// </summary>
     public class StructDeclaration
     {
+        /// <summary>Sentinel strings for <c>is dynamic</c> / <c>is struct</c> kind queries.</summary>
+        public const string KindQueryDynamic = "__kind_dynamic__";
+        public const string KindQueryStruct = "__kind_struct__";
+
         public string name { get; private set; }
+        public StructKind kind { get; private set; }
+        public bool isDynamic { get { return kind == StructKind.Dynamic; } }
         public List<string> bases { get; private set; }
         public List<StructFieldSlot> fields { get; private set; }
         /// <summary>Flattened method name → divert path string (e.g. Character.static.ReactFurious).</summary>
@@ -51,9 +57,11 @@ namespace Ink.Runtime
             Dictionary<string, string> methods,
             Dictionary<string, string> baseCalls = null,
             Dictionary<string, string> stitches = null,
-            Dictionary<string, string> stitchBaseCalls = null)
+            Dictionary<string, string> stitchBaseCalls = null,
+            StructKind kind = StructKind.Struct)
         {
             this.name = name;
+            this.kind = kind;
             this.bases = bases ?? new List<string> ();
             this.fields = fields ?? new List<StructFieldSlot> ();
             this.methods = methods ?? new Dictionary<string, string> ();
