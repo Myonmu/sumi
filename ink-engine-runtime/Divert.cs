@@ -59,6 +59,9 @@ namespace Ink.Runtime
         public string variableDivertName { get; set; }
         public bool hasVariableTarget { get { return variableDivertName != null; } }
 
+        /// <summary>When true, divert target path is popped from the evaluation stack as a string.</summary>
+        public bool pathFromStack { get; set; }
+
         public bool pushesToStack { get; set; }
         public PushPopType stackPushType;
 
@@ -82,6 +85,8 @@ namespace Ink.Runtime
         {
             var otherDivert = obj as Divert;
             if (otherDivert) {
+                if (this.pathFromStack || otherDivert.pathFromStack)
+                    return this.pathFromStack == otherDivert.pathFromStack;
                 if (this.hasVariableTarget == otherDivert.hasVariableTarget) {
                     if (this.hasVariableTarget) {
                         return this.variableDivertName == otherDivert.variableDivertName;
@@ -95,7 +100,9 @@ namespace Ink.Runtime
 
         public override int GetHashCode ()
         {
-            if (hasVariableTarget) {
+            if (pathFromStack) {
+                return 99991;
+            } else if (hasVariableTarget) {
                 const int variableTargetSalt = 12345;
                 return variableDivertName.GetHashCode() + variableTargetSalt;
             } else {
@@ -106,7 +113,10 @@ namespace Ink.Runtime
 
         public override string ToString ()
         {
-            if (hasVariableTarget) {
+            if (pathFromStack) {
+                return "Divert(path from stack)";
+            }
+            else if (hasVariableTarget) {
                 return "Divert(variable: " + variableDivertName + ")";
             }
             else if (targetPath == null) {

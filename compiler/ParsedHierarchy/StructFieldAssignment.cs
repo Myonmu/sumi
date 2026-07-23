@@ -41,6 +41,7 @@ namespace Ink.Parsed
         {
             pathIdentifiers = path;
             expression = AddContent (expr);
+            StructPathCodegen.AddDynamicNameContent (this, path);
         }
 
         public override Runtime.Object GenerateRuntimeObject ()
@@ -50,19 +51,23 @@ namespace Ink.Parsed
 
             var rootName = pathIdentifiers [0].name;
             bool targetIsRefVar = TargetFieldIsRefVar ();
+            var lastId = pathIdentifiers [pathIdentifiers.Count - 1];
 
             if (pathIdentifiers.Count == 2) {
-                // Oswald.name = expr
+                // Oswald.name = expr  /  Oswald.{n} = expr
                 container.AddContent (new Runtime.VariablePointerValue (rootName));
                 GenerateRhs (container, targetIsRefVar);
-                container.AddContent (new Runtime.StructFieldSet (pathIdentifiers [1].name));
+                StructPathCodegen.GenerateFieldSet (container, lastId);
             } else {
                 container.AddContent (new Runtime.VariableReference (rootName));
                 for (int i = 1; i < pathIdentifiers.Count - 1; i++) {
-                    container.AddContent (new Runtime.StructFieldGet (pathIdentifiers [i].name));
+                    if (pathIdentifiers [i] != null && pathIdentifiers [i].name == "static" && i == 1
+                        && !pathIdentifiers [i].isDynamic)
+                        continue;
+                    StructPathCodegen.GenerateFieldGet (container, pathIdentifiers [i]);
                 }
                 GenerateRhs (container, targetIsRefVar);
-                container.AddContent (new Runtime.StructFieldSet (pathIdentifiers [pathIdentifiers.Count - 1].name));
+                StructPathCodegen.GenerateFieldSet (container, lastId);
             }
 
             container.AddContent (Runtime.ControlCommand.EvalEnd ());
@@ -95,9 +100,9 @@ namespace Ink.Parsed
             if (story == null || pathIdentifiers == null || pathIdentifiers.Count < 2)
                 return false;
 
-            var path = new List<string> ();
-            foreach (var id in pathIdentifiers)
-                path.Add (id?.name);
+            var path = StructPathCodegen.PathNames (pathIdentifiers);
+            if (path [path.Count - 1] == null)
+                return false;
 
             StructDeclaration type;
             int start;
@@ -110,6 +115,8 @@ namespace Ink.Parsed
 
             // Walk to the struct that owns the final field
             for (int i = start; i < path.Count - 1; i++) {
+                if (path [i] == null)
+                    return false;
                 var field = type.FindField (path [i]);
                 if (field == null || string.IsNullOrEmpty (field.structTypeName))
                     return false;
@@ -128,11 +135,7 @@ namespace Ink.Parsed
         {
             base.ResolveReferences (context);
 
-            var path = new List<string> ();
-            foreach (var id in pathIdentifiers)
-                path.Add (id?.name);
-
-            context.ValidateStructFieldAccess (path, this);
+            context.ValidateStructFieldAccess (StructPathCodegen.PathNames (pathIdentifiers), this);
         }
 
         public override string typeName {

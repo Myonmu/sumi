@@ -43,8 +43,9 @@ namespace Ink.Parsed
         public VariableReference (List<Identifier> pathIdentifiers)
         {
             this.pathIdentifiers = pathIdentifiers;
-            this.path = pathIdentifiers.Select(id => id?.name).ToList();
+            this.path = StructPathCodegen.PathNames (pathIdentifiers);
             this.name = string.Join(".", pathIdentifiers);
+            StructPathCodegen.AddDynamicNameContent (this, pathIdentifiers);
         }
 
         public override void GenerateIntoContainer (Runtime.Container container)
@@ -74,10 +75,11 @@ namespace Ink.Parsed
                     container.AddContent (new Runtime.VariablePointerValue ("self"));
                 else
                     container.AddContent (new Runtime.VariableReference (path [0]));
-                for (int i = 1; i < path.Count; i++) {
-                    if (path [i] == "static" && i == 1)
+                for (int i = 1; i < pathIdentifiers.Count; i++) {
+                    if (pathIdentifiers [i] != null && pathIdentifiers [i].name == "static" && i == 1
+                        && !pathIdentifiers [i].isDynamic)
                         continue;
-                    container.AddContent (new Runtime.StructFieldGet (path [i]));
+                    StructPathCodegen.GenerateFieldGet (container, pathIdentifiers [i]);
                 }
                 return;
             }

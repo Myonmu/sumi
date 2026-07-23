@@ -81,7 +81,9 @@ namespace Ink.Runtime
                 }
 
                 string targetStr;
-                if (divert.hasVariableTarget)
+                if (divert.pathFromStack)
+                    targetStr = "";
+                else if (divert.hasVariableTarget)
                     targetStr = divert.variableDivertName;
                 else
                     targetStr = divert.targetPathString;
@@ -90,7 +92,9 @@ namespace Ink.Runtime
 
                 writer.WriteProperty(divTypeKey, targetStr);
 
-                if (divert.hasVariableTarget)
+                if (divert.pathFromStack)
+                    writer.WriteProperty("stack", true);
+                else if (divert.hasVariableTarget)
                     writer.WriteProperty("var", true);
 
                 if (divert.isConditional)
@@ -253,7 +257,10 @@ namespace Ink.Runtime
             var structFieldGet = obj as StructFieldGet;
             if (structFieldGet) {
                 writer.WriteObjectStart ();
-                writer.WriteProperty ("sget", structFieldGet.fieldName);
+                if (structFieldGet.fieldName == null)
+                    writer.WriteProperty ("sget", true);
+                else
+                    writer.WriteProperty ("sget", structFieldGet.fieldName);
                 writer.WriteObjectEnd ();
                 return;
             }
@@ -261,7 +268,10 @@ namespace Ink.Runtime
             var structFieldSet = obj as StructFieldSet;
             if (structFieldSet) {
                 writer.WriteObjectStart ();
-                writer.WriteProperty ("sset", structFieldSet.fieldName);
+                if (structFieldSet.fieldName == null)
+                    writer.WriteProperty ("sset", true);
+                else
+                    writer.WriteProperty ("sset", structFieldSet.fieldName);
                 writer.WriteObjectEnd ();
                 return;
             }
@@ -279,7 +289,10 @@ namespace Ink.Runtime
             var structMethodCall = obj as StructMethodCall;
             if (structMethodCall) {
                 writer.WriteObjectStart ();
-                writer.WriteProperty (structMethodCall.isBaseCall ? "sbase" : "scall", structMethodCall.methodName);
+                if (structMethodCall.methodName == null)
+                    writer.WriteProperty (structMethodCall.isBaseCall ? "sbase" : "scall", true);
+                else
+                    writer.WriteProperty (structMethodCall.isBaseCall ? "sbase" : "scall", structMethodCall.methodName);
                 writer.WriteProperty ("argc", structMethodCall.argumentCount);
                 if (structMethodCall.targetPathString != null)
                     writer.WriteProperty ("path", structMethodCall.targetPathString);
@@ -290,7 +303,10 @@ namespace Ink.Runtime
             var structStitchDivert = obj as StructStitchDivert;
             if (structStitchDivert) {
                 writer.WriteObjectStart ();
-                writer.WriteProperty (structStitchDivert.isBaseCall ? "sbasedivert" : "sdivert", structStitchDivert.stitchName);
+                if (structStitchDivert.stitchName == null)
+                    writer.WriteProperty (structStitchDivert.isBaseCall ? "sbasedivert" : "sdivert", true);
+                else
+                    writer.WriteProperty (structStitchDivert.isBaseCall ? "sbasedivert" : "sdivert", structStitchDivert.stitchName);
                 writer.WriteProperty ("argc", structStitchDivert.argumentCount);
                 if (structStitchDivert.isTunnel)
                     writer.WriteProperty ("tunnel", true);
@@ -470,10 +486,16 @@ namespace Ink.Runtime
                 }
 
                 // Struct field get/set / create / method call
-                if (obj.TryGetValue ("sget", out propValue))
+                if (obj.TryGetValue ("sget", out propValue)) {
+                    if (propValue is bool && (bool)propValue)
+                        return new StructFieldGet (null);
                     return new StructFieldGet ((string)propValue);
-                if (obj.TryGetValue ("sset", out propValue))
+                }
+                if (obj.TryGetValue ("sset", out propValue)) {
+                    if (propValue is bool && (bool)propValue)
+                        return new StructFieldSet (null);
                     return new StructFieldSet ((string)propValue);
+                }
                 if (obj.TryGetValue ("snew", out propValue)) {
                     var create = new StructCreateDefault ((string)propValue);
                     object sdyn;
@@ -483,14 +505,16 @@ namespace Ink.Runtime
                 }
                 if (obj.TryGetValue ("scall", out propValue) || obj.TryGetValue ("sbase", out propValue)) {
                     bool isBase = obj.ContainsKey ("sbase");
-                    string methodName = (string)(isBase ? obj ["sbase"] : obj ["scall"]);
+                    object nameTok = isBase ? obj ["sbase"] : obj ["scall"];
+                    string methodName = (nameTok is bool && (bool)nameTok) ? null : (string)nameTok;
                     int argc = obj.TryGetValue ("argc", out propValue) ? (int)propValue : 0;
                     string path = obj.TryGetValue ("path", out propValue) ? (string)propValue : null;
                     return new StructMethodCall (methodName, argc, isBase, path);
                 }
                 if (obj.TryGetValue ("sdivert", out propValue) || obj.TryGetValue ("sbasedivert", out propValue)) {
                     bool isBase = obj.ContainsKey ("sbasedivert");
-                    string stitchName = (string)(isBase ? obj ["sbasedivert"] : obj ["sdivert"]);
+                    object nameTok = isBase ? obj ["sbasedivert"] : obj ["sdivert"];
+                    string stitchName = (nameTok is bool && (bool)nameTok) ? null : (string)nameTok;
                     int argc = obj.TryGetValue ("argc", out propValue) ? (int)propValue : 0;
                     bool isTunnel = obj.TryGetValue ("tunnel", out propValue) && propValue is bool && (bool)propValue;
                     string path = obj.TryGetValue ("path", out propValue) ? (string)propValue : null;
@@ -529,7 +553,9 @@ namespace Ink.Runtime
 
                     string target = propValue.ToString ();
 
-                    if (obj.TryGetValue ("var", out propValue))
+                    if (obj.TryGetValue ("stack", out propValue))
+                        divert.pathFromStack = true;
+                    else if (obj.TryGetValue ("var", out propValue))
                         divert.variableDivertName = target;
                     else
                         divert.targetPathString = target;

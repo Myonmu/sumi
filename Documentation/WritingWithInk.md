@@ -3638,6 +3638,7 @@ Rules:
 - Dot access on a dynamic does **not** fail at compile time. Reading or calling a missing slot is a **runtime** error; assigning a new name creates that slot.
 - Remove a slot with `~ instance.slot = []` (empty `()` remains an empty **list** literal).
 - Method slots hold divert targets to compiled functions (`~ d.M = -> Type.static.M`). Calls still push `self`.
+- Evaluated path components: `instance.{nameVar}`, `-> knot.{stitchVar}`, and `instance.{methodVar}()` use the string result of the brace expression as the field, stitch, or method name.
 - `{x is dynamic}` / `{x is struct}` test kind (not inheritance). `{x is SomeType}` still walks bases.
 - `{x has slot}` / `{x hasnt slot}` test whether a field or method slot is present.
 - `REFVAR r: dynamic` only accepts dynamics; untyped `REFVAR r` accepts struct or dynamic; typed `REFVAR r: SomeStruct` rejects dynamics. Adding/removing slots on a closed struct is an error.

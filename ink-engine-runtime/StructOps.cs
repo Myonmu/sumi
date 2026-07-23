@@ -3,6 +3,7 @@ namespace Ink.Runtime
     /// <summary>
     /// Pop a StructValue (or pointer to one), push the named field value.
     /// Follows REFVAR to the target instance when needed.
+    /// When <see cref="fieldName"/> is null, the name is popped from the evaluation stack first.
     /// </summary>
     public class StructFieldGet : Runtime.Object
     {
@@ -17,12 +18,12 @@ namespace Ink.Runtime
 
         public override string ToString ()
         {
-            return "StructFieldGet(" + fieldName + ")";
+            return fieldName == null ? "StructFieldGet(<stack>)" : "StructFieldGet(" + fieldName + ")";
         }
     }
 
     /// <summary>
-    /// Stack (bottom→top): instance-or-pointer, value.
+    /// Stack (bottom→top): instance-or-pointer, value [, name when fieldName is null].
     /// Sets the named field on the instance (deep-copy for embedded structs; rebind for REFVAR).
     /// </summary>
     public class StructFieldSet : Runtime.Object
@@ -38,13 +39,13 @@ namespace Ink.Runtime
 
         public override string ToString ()
         {
-            return "StructFieldSet(" + fieldName + ")";
+            return fieldName == null ? "StructFieldSet(<stack>)" : "StructFieldSet(" + fieldName + ")";
         }
     }
 
     /// <summary>
     /// Virtual (or base) method call.
-    /// Stack (bottom→top): receiver pointer, arg0, arg1, ... argN
+    /// Stack (bottom→top): receiver pointer [, methodName when methodName is null], arg0, arg1, ... argN
     /// Pops args+receiver, pushes them back for the function entry convention, then diverts.
     /// </summary>
     public class StructMethodCall : Runtime.Object
@@ -67,13 +68,14 @@ namespace Ink.Runtime
 
         public override string ToString ()
         {
-            return (isBaseCall ? "BaseCall(" : "StructMethodCall(") + methodName + "," + argumentCount + ")";
+            var name = methodName ?? "<stack>";
+            return (isBaseCall ? "BaseCall(" : "StructMethodCall(") + name + "," + argumentCount + ")";
         }
     }
 
     /// <summary>
     /// Virtual (or base) narrative stitch divert / tunnel.
-    /// Stack (bottom→top): receiver pointer, arg0, arg1, ... argN
+    /// Stack (bottom→top): receiver pointer [, stitchName when stitchName is null], arg0, arg1, ... argN
     /// Same entry convention as StructMethodCall, but uses Tunnel or plain divert.
     /// </summary>
     public class StructStitchDivert : Runtime.Object
@@ -99,7 +101,8 @@ namespace Ink.Runtime
         public override string ToString ()
         {
             var kind = isBaseCall ? "BaseStitchDivert" : "StructStitchDivert";
-            return kind + "(" + stitchName + "," + argumentCount + (isTunnel ? ",tunnel" : "") + ")";
+            var name = stitchName ?? "<stack>";
+            return kind + "(" + name + "," + argumentCount + (isTunnel ? ",tunnel" : "") + ")";
         }
     }
 

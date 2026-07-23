@@ -1205,6 +1205,15 @@ namespace Ink.Runtime
                     var target = (DivertTargetValue)varContents;
                     state.divertedPointer = PointerAtPath(target.targetPath);
 
+                } else if (currentDivert.pathFromStack) {
+                    var pathObj = state.PopEvaluationStack ();
+                    string pathStr = NameFromStackValue (pathObj);
+                    if (string.IsNullOrEmpty (pathStr)) {
+                        Error ("Tried to divert using an empty path from stack");
+                    } else {
+                        state.divertedPointer = PointerAtPath (new Path (pathStr));
+                    }
+
                 } else if (currentDivert.isExternal) {
                     CallExternalFunction (currentDivert.targetPathString, currentDivert.externalArgs);
                     return true;
@@ -1730,17 +1739,20 @@ namespace Ink.Runtime
             // Struct field get: pop instance, push field
             else if (contentObj is StructFieldGet) {
                 var fieldGet = (StructFieldGet)contentObj;
+                string fieldName = fieldGet.fieldName;
+                if (fieldName == null)
+                    fieldName = NameFromStackValue (state.PopEvaluationStack ());
                 var instanceObj = state.PopEvaluationStack ();
                 var structObj = ResolveStructInstance (instanceObj);
                 if (structObj == null) {
-                    Error ("Cannot get field '" + fieldGet.fieldName + "' on non-struct value");
+                    Error ("Cannot get field '" + fieldName + "' on non-struct value");
                     state.PushEvaluationStack (new IntValue (0));
                     return true;
                 }
-                var fieldVal = structObj.GetField (fieldGet.fieldName);
+                var fieldVal = structObj.GetField (fieldName);
                 if (fieldVal == null) {
                     // Method slots are not readable as fields; missing field is a runtime error
-                    Error ("Field '" + fieldGet.fieldName + "' not found on '" + structObj.typeName + "'");
+                    Error ("Field '" + fieldName + "' not found on '" + structObj.typeName + "'");
                     state.PushEvaluationStack (new IntValue (0));
                     return true;
                 }
@@ -1748,7 +1760,7 @@ namespace Ink.Runtime
                 var refVal = fieldVal as StructRefValue;
                 if (refVal != null) {
                     if (string.IsNullOrEmpty (refVal.targetName)) {
-                        Error ("REFVAR '" + fieldGet.fieldName + "' is none");
+                        Error ("REFVAR '" + fieldName + "' is none");
                         state.PushEvaluationStack (new IntValue (0));
                         return true;
                     }
@@ -1758,12 +1770,15 @@ namespace Ink.Runtime
                 return true;
             }
 
-            // Struct field set: stack is [instance, value] (value on top)
+            // Struct field set: stack is [instance, value] or [instance, value, name]
             else if (contentObj is StructFieldSet) {
                 var fieldSet = (StructFieldSet)contentObj;
+                string fieldName = fieldSet.fieldName;
+                if (fieldName == null)
+                    fieldName = NameFromStackValue (state.PopEvaluationStack ());
                 var valueToSet = state.PopEvaluationStack ();
                 var instanceObj = state.PopEvaluationStack ();
-                SetStructField (instanceObj, fieldSet.fieldName, valueToSet);
+                SetStructField (instanceObj, fieldName, valueToSet);
                 return true;
             }
 
@@ -2119,10 +2134,14 @@ namespace Ink.Runtime
 
         void PerformStructMethodCall (StructMethodCall call)
         {
-            // Stack: receiverPtr, arg0, ... argN (argN on top)
+            // Stack: receiverPtr [, methodName], arg0, ... argN (argN on top)
             var args = new List<Runtime.Object> ();
             for (int i = 0; i < call.argumentCount; i++)
                 args.Insert (0, state.PopEvaluationStack ());
+
+            string methodName = call.methodName;
+            if (methodName == null)
+                methodName = NameFromStackValue (state.PopEvaluationStack ());
 
             var receiver = state.PopEvaluationStack ();
 
@@ -2130,21 +2149,21 @@ namespace Ink.Runtime
             if (!call.isBaseCall) {
                 var instance = ResolveStructInstance (receiver);
                 if (instance == null) {
-                    Error ("Cannot call method '" + call.methodName + "' on non-struct / none");
+                    Error ("Cannot call method '" + methodName + "' on non-struct / none");
                     return;
                 }
 
                 if (instance.isDynamic) {
-                    var methodTarget = instance.GetMethod (call.methodName);
+                    var methodTarget = instance.GetMethod (methodName);
                     if (methodTarget == null || methodTarget.targetPath == null) {
-                        Error ("Method '" + call.methodName + "' not found on dynamic '" + instance.typeName + "'");
+                        Error ("Method '" + methodName + "' not found on dynamic '" + instance.typeName + "'");
                         return;
                     }
                     pathStr = methodTarget.targetPath.componentsString;
                 } else {
                     StructDeclaration typeDesc = _structDefinitions?.GetDefinition (instance.typeName);
-                    if (typeDesc == null || !typeDesc.TryGetMethodPath (call.methodName, out pathStr)) {
-                        Error ("Method '" + call.methodName + "' not found on struct '" + instance.typeName + "'");
+                    if (typeDesc == null || !typeDesc.TryGetMethodPath (methodName, out pathStr)) {
+                        Error ("Method '" + methodName + "' not found on struct '" + instance.typeName + "'");
                         return;
                     }
                 }
@@ -2165,10 +2184,14 @@ namespace Ink.Runtime
 
         void PerformStructStitchDivert (StructStitchDivert divert)
         {
-            // Stack: receiverPtr, arg0, ... argN (argN on top)
+            // Stack: receiverPtr [, stitchName], arg0, ... argN (argN on top)
             var args = new List<Runtime.Object> ();
             for (int i = 0; i < divert.argumentCount; i++)
                 args.Insert (0, state.PopEvaluationStack ());
+
+            string stitchName = divert.stitchName;
+            if (stitchName == null)
+                stitchName = NameFromStackValue (state.PopEvaluationStack ());
 
             var receiver = state.PopEvaluationStack ();
 
@@ -2176,29 +2199,38 @@ namespace Ink.Runtime
             if (!divert.isBaseCall) {
                 var instance = ResolveStructInstance (receiver);
                 if (instance == null) {
-                    Error ("Cannot divert to stitch '" + divert.stitchName + "' on non-struct / none");
+                    Error ("Cannot divert to stitch '" + stitchName + "' on non-struct / none");
                     return;
                 }
+
                 StructDeclaration typeDesc = _structDefinitions?.GetDefinition (instance.typeName);
-                if (typeDesc == null || !typeDesc.TryGetStitchPath (divert.stitchName, out pathStr)) {
-                    Error ("Stitch '" + divert.stitchName + "' not found on struct '" + instance.typeName + "'");
+                if (typeDesc == null || !typeDesc.TryGetStitchPath (stitchName, out pathStr)) {
+                    Error ("Stitch '" + stitchName + "' not found on '" + instance.typeName + "'");
                     return;
                 }
             }
 
-            // Push receiver then args for stitch parameter entry (same as methods / knots)
             state.PushEvaluationStack (receiver);
             foreach (var a in args)
                 state.PushEvaluationStack (a);
 
             var path = new Path (pathStr);
             state.divertedPointer = PointerAtPath (path);
-
             if (divert.isTunnel)
                 state.callStack.Push (PushPopType.Tunnel, outputStreamLengthWithPushed: state.outputStream.Count);
 
             if (state.divertedPointer.isNull)
                 Error ("Struct stitch path not found: " + pathStr);
+        }
+
+        static string NameFromStackValue (Runtime.Object obj)
+        {
+            if (obj == null)
+                return null;
+            var str = obj as StringValue;
+            if (str != null)
+                return str.value;
+            return obj.ToString ();
         }
 
         /// <summary>

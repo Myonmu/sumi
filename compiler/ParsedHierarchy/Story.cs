@@ -913,6 +913,8 @@ namespace Ink.Parsed
 
             var typeCursor = type;
             for (int i = start; i < path.Count; i++) {
+                if (path [i] == null)
+                    return; // evaluated component — soft (runtime resolves)
                 var field = typeCursor.FindField (path [i]);
                 if (field == null) {
                     fromNode.Error ("Struct '" + typeCursor.name + "' has no field named '" + path [i] + "'", fromNode);
@@ -969,6 +971,8 @@ namespace Ink.Parsed
 
             var typeCursor = type;
             for (int i = start; i < methodIndex; i++) {
+                if (pathIncludingMethod [i] == null)
+                    return; // evaluated intermediate — soft
                 var field = typeCursor.FindField (pathIncludingMethod [i]);
                 if (field == null) {
                     fromNode.Error ("Struct '" + typeCursor.name + "' has no field named '" + pathIncludingMethod [i] + "'", fromNode);
@@ -990,6 +994,9 @@ namespace Ink.Parsed
                 typeCursor = next;
             }
 
+            if (methodName == null)
+                return; // evaluated method name — soft
+
             if (!typeCursor.HasMethod (methodName)) {
                 if (typeCursor.HasStitch (methodName))
                     fromNode.Error ("Stitch '" + methodName + "' cannot be called as a function; divert with '->' instead", fromNode);
@@ -1006,6 +1013,10 @@ namespace Ink.Parsed
             string stitchName = pathIncludingStitch [pathIncludingStitch.Count - 1];
 
             if (pathIncludingStitch [0] == "base") {
+                if (stitchName == null) {
+                    fromNode.Error ("-> base.{...} is not supported; base stitch diverts need a literal name", fromNode);
+                    return;
+                }
                 var enclosing = ClosestStructStitch (fromNode);
                 var structDecl = enclosing?.parent as StructDeclaration;
                 if (structDecl == null || structDecl.stitchBaseCallPaths == null || !structDecl.stitchBaseCallPaths.ContainsKey (stitchName)) {
@@ -1027,6 +1038,10 @@ namespace Ink.Parsed
                 fromNode.Error ("Cannot resolve struct type for '" + pathIncludingStitch [0] + "' in stitch divert", fromNode);
                 return;
             }
+
+            // Anonymous / named dynamic or evaluated stitch name: soft
+            if (type == null || type.isDynamic || stitchName == null)
+                return;
 
             int stitchIndex = pathIncludingStitch.Count - 1;
             if (start > stitchIndex) {
@@ -1085,7 +1100,15 @@ namespace Ink.Parsed
 
             if (pathNames [0] == "self") {
                 var ctx = ClosestStructContext (fromNode);
-                return ctx != null && ctx.HasStitch (stitchName);
+                if (ctx == null)
+                    return false;
+                if (stitchName == null)
+                    return true;
+                if (ctx.HasStitch (stitchName))
+                    return true;
+                if (ctx.HasMethod (stitchName))
+                    return false;
+                return ctx.isDynamic;
             }
 
             // Prefer ordinary knot.stitch diverts when a knot exists with that name
@@ -1104,14 +1127,20 @@ namespace Ink.Parsed
                 if (typeName == null)
                     return false;
                 type = ResolveStruct (typeName);
-                if (type == null)
+                if (type == null && typeName != "dynamic")
                     return false;
                 start = 1;
             }
 
+            // Anonymous dynamic
+            if (type == null)
+                return true;
+
             var typeCursor = type;
             int stitchIndex = pathNames.Count - 1;
             for (int i = start; i < stitchIndex; i++) {
+                if (pathNames [i] == null)
+                    return typeCursor.isDynamic; // can't walk further statically
                 var field = typeCursor.FindField (pathNames [i]);
                 if (field == null || string.IsNullOrEmpty (field.structTypeName))
                     return false;
@@ -1120,7 +1149,15 @@ namespace Ink.Parsed
                     return false;
             }
 
-            return typeCursor.HasStitch (stitchName);
+            if (stitchName == null)
+                return true; // evaluated stitch name
+
+            if (typeCursor.HasStitch (stitchName))
+                return true;
+            if (typeCursor.HasMethod (stitchName))
+                return false;
+            // Unknown name on dynamic: soft-allow as stitch divert candidate
+            return typeCursor.isDynamic;
         }
 
         /// <summary>
@@ -1132,6 +1169,8 @@ namespace Ink.Parsed
                 return false;
 
             string methodName = pathNames [pathNames.Count - 1];
+            if (methodName == null)
+                return false; // evaluated name — prefer stitch divert / path divert handling
 
             if (pathNames [0] == "base" || pathNames [0] == "self") {
                 var ctx = ClosestStructContext (fromNode);

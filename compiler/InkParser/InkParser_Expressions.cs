@@ -345,13 +345,77 @@ namespace Ink
         }
 
         /// <summary>
-        /// Successive dot access ( a.b.c )
+        /// Successive dot access ( a.b.c ), including evaluated components ( a.{x} ).
+        /// First component must be a literal identifier.
         /// </summary>
-        /// <returns></returns>
         protected List<Identifier> DotAccessCall()
         {
-            ParseRule dots = Exclude(String("."));
-            return Interleave<Identifier>(IdentifierWithMetadata, dots);
+            return ParseDottedPath (allowSpacesAroundDots: false);
+        }
+
+        /// <summary>
+        /// A path component after a dot: either a literal identifier or <c>{expression}</c>.
+        /// </summary>
+        protected Identifier PathComponentWithOptionalBraceExpr()
+        {
+            var id = Parse (IdentifierWithMetadata);
+            if (id != null)
+                return id;
+
+            if (ParseString ("{") == null)
+                return null;
+
+            Whitespace ();
+            var expr = (Expression)Expect (Expression, "expression inside '{...}' for evaluated path component");
+            Whitespace ();
+            Expect (String ("}"), "closing '}' for evaluated path component");
+
+            if (expr == null)
+                return null;
+
+            return new Identifier {
+                name = null,
+                dynamicNameExpression = expr,
+                debugMetadata = null
+            };
+        }
+
+        /// <summary>
+        /// Dotted path starting with a literal identifier; further components may be <c>{expr}</c>.
+        /// </summary>
+        protected List<Identifier> ParseDottedPath (bool allowSpacesAroundDots)
+        {
+            var first = Parse (IdentifierWithMetadata);
+            if (first == null)
+                return null;
+
+            var path = new List<Identifier> { first };
+
+            while (true) {
+                int nextRuleId = BeginRule ();
+
+                if (allowSpacesAroundDots)
+                    Whitespace ();
+
+                if (ParseString (".") == null) {
+                    FailRule (nextRuleId);
+                    break;
+                }
+
+                if (allowSpacesAroundDots)
+                    Whitespace ();
+
+                var comp = (Identifier)Expect (PathComponentWithOptionalBraceExpr, "name or '{expression}' after '.'");
+                if (comp == null) {
+                    FailRule (nextRuleId);
+                    break;
+                }
+
+                SucceedRule (nextRuleId);
+                path.Add (comp);
+            }
+
+            return path;
         }
 
         protected Expression ExpressionFunctionCall()
@@ -400,7 +464,7 @@ namespace Ink
             }
             FailRule (ruleId);
 
-            List<Identifier> path = Interleave<Identifier> (IdentifierWithMetadata, Exclude (Spaced (String ("."))));
+            List<Identifier> path = ParseDottedPath (allowSpacesAroundDots: true);
 
             // Allow 'self' as a receiver (Python-style); allow 'dynamic'/'struct' for is/isnt kind queries.
             // Other reserved keywords stay invalid as names.

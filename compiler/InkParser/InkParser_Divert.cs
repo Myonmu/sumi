@@ -170,7 +170,8 @@ namespace Ink
 
         List<Identifier> DotSeparatedDivertPathComponents()
         {
-            return Interleave<Identifier> (Spaced (IdentifierWithMetadata), Exclude (String (".")));
+            // Spaces allowed around dots; components after the first may be {expr}
+            return ParseDottedPath (allowSpacesAroundDots: true);
         }
 
         protected string ParseDivertArrowOrTunnelOnwards()

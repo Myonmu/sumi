@@ -282,6 +282,7 @@ namespace Ink.Parsed
             this.expression = expression;
             if (expression != null)
                 AddContent (expression);
+            StructPathCodegen.AddDynamicNameContent (this, pathIdentifiers);
         }
 
         bool isStructFieldTarget {
@@ -296,18 +297,19 @@ namespace Ink.Parsed
             // Reverse polish notation: (x 1 +) (assign to x)
 
             if (isStructFieldTarget) {
-                // parent, parent, fieldVal, delta, +/- → parent, newVal → StructFieldSet
+                // parent, parent, fieldVal, delta, +/- → parent, newVal[, name] → StructFieldSet
                 var rootName = pathIdentifiers [0].name;
+                var lastId = pathIdentifiers [pathIdentifiers.Count - 1];
                 if (rootName == "self")
                     container.AddContent (new Runtime.VariablePointerValue ("self"));
                 else
                     container.AddContent (new Runtime.VariableReference (rootName));
 
                 for (int i = 1; i < pathIdentifiers.Count - 1; i++)
-                    container.AddContent (new Runtime.StructFieldGet (pathIdentifiers [i].name));
+                    StructPathCodegen.GenerateFieldGet (container, pathIdentifiers [i]);
 
                 container.AddContent (Runtime.ControlCommand.Duplicate ());
-                container.AddContent (new Runtime.StructFieldGet (pathIdentifiers [pathIdentifiers.Count - 1].name));
+                StructPathCodegen.GenerateFieldGet (container, lastId);
 
                 if (expression)
                     expression.GenerateIntoContainer (container);
@@ -315,7 +317,7 @@ namespace Ink.Parsed
                     container.AddContent (new Runtime.IntValue (1));
 
                 container.AddContent (Runtime.NativeFunctionCall.CallWithName (isInc ? "+" : "-"));
-                container.AddContent (new Runtime.StructFieldSet (pathIdentifiers [pathIdentifiers.Count - 1].name));
+                StructPathCodegen.GenerateFieldSet (container, lastId);
                 return;
             }
 
@@ -344,7 +346,7 @@ namespace Ink.Parsed
 
             if (isStructFieldTarget) {
                 context.ValidateStructFieldAccess (
-                    pathIdentifiers.Select (id => id?.name).ToList (), this);
+                    StructPathCodegen.PathNames (pathIdentifiers), this);
 
                 if (!(parent is Weave) && !(parent is FlowBase) && !(parent is ContentList)) {
                     Error ("Can't use " + incrementDecrementWord + " as sub-expression");

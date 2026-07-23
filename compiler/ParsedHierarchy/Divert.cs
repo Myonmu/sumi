@@ -35,6 +35,8 @@ namespace Ink.Parsed
             if (arguments != null) {
                 AddContent (arguments.Cast<Parsed.Object> ().ToList ());
             }
+            if (target != null)
+                StructPathCodegen.AddDynamicNameContent (this, target.components);
 		}
 
         public Divert (Parsed.Object targetContent)
@@ -58,6 +60,11 @@ namespace Ink.Parsed
                 return structStitchRuntime;
 
             runtimeDivert = new Runtime.Divert ();
+
+            // Path with evaluated components: -> knot.{name}
+            if (target != null && StructPathCodegen.HasDynamicComponent (target.components)) {
+                return GenerateDivertFromDynamicPath ();
+            }
 
             // Normally we resolve the target content during the
             // Resolve phase, since we expect all runtime objects to
@@ -179,9 +186,7 @@ namespace Ink.Parsed
             if (comps == null || comps.Count < 2)
                 return false;
 
-            var pathNames = new List<string> ();
-            foreach (var c in comps)
-                pathNames.Add (c.name);
+            var pathNames = StructPathCodegen.PathNames (comps);
 
             var storyContext = story;
             if (storyContext == null)
@@ -192,7 +197,8 @@ namespace Ink.Parsed
             if (storyContext.IsStructMethodDivertPath (pathNames, this)) {
                 if (this.parent is DivertTarget)
                     return false;
-                Error ("Method '" + pathNames [pathNames.Count - 1] + "' can't be diverted to. It can only be called as a function");
+                var methodLabel = pathNames [pathNames.Count - 1] ?? "{...}";
+                Error ("Method '" + methodLabel + "' can't be diverted to. It can only be called as a function");
                 result = Runtime.ControlCommand.Done ();
                 return true;
             }
@@ -205,16 +211,19 @@ namespace Ink.Parsed
                 return false;
             }
 
-            string stitchName = comps [comps.Count - 1].name;
+            var stitchId = comps [comps.Count - 1];
+            string stitchName = stitchId.isDynamic ? null : stitchId.name;
             bool isBase = comps [0].name == "base";
 
             List<FlowBase.Argument> authorArgs = null;
-            if (!isBase) {
+            if (!isBase && stitchName != null) {
                 StructDeclaration recvType;
                 int start;
                 if (storyContext.TryResolveStructPathContext (pathNames, this, out recvType, out start, reportErrors: false)) {
                     var typeCursor = recvType;
                     for (int i = start; i < pathNames.Count - 1; i++) {
+                        if (pathNames [i] == null)
+                            break;
                         var field = typeCursor.FindField (pathNames [i]);
                         if (field == null || string.IsNullOrEmpty (field.structTypeName))
                             break;
@@ -224,13 +233,13 @@ namespace Ink.Parsed
                     }
                     authorArgs = typeCursor?.FindStitch (stitchName)?.authorArguments;
                 }
-            } else {
+            } else if (isBase && stitchName != null) {
                 var enclosing = Story.ClosestStructStitch (this);
                 var structDecl = enclosing?.parent as StructDeclaration;
                 authorArgs = structDecl?.FindStitch (stitchName)?.authorArguments;
             }
 
-            return EmitStructStitchDivert (pathNames, stitchName, isBase, authorArgs, out result);
+            return EmitStructStitchDivert (comps, pathNames, stitchName, isBase, authorArgs, out result);
         }
 
         bool TryGenerateStructStitchDivertFromResolvedTarget (out Runtime.Object result)
@@ -252,10 +261,16 @@ namespace Ink.Parsed
             // (shouldn't happen for isFunction stitches — filtered above)
 
             var pathNames = new List<string> { "self", stitch.name };
-            return EmitStructStitchDivert (pathNames, stitchName: stitch.name, isBase: false, authorArgs: StructDeclaration.AuthorFacingArguments (stitch), out result);
+            return EmitStructStitchDivert (
+                new List<Identifier> {
+                    new Identifier { name = "self" },
+                    new Identifier { name = stitch.name }
+                },
+                pathNames, stitchName: stitch.name, isBase: false,
+                authorArgs: StructDeclaration.AuthorFacingArguments (stitch), out result);
         }
 
-        bool EmitStructStitchDivert (List<string> pathNames, string stitchName, bool isBase, List<FlowBase.Argument> authorArgs, out Runtime.Object result)
+        bool EmitStructStitchDivert (List<Identifier> comps, List<string> pathNames, string stitchName, bool isBase, List<FlowBase.Argument> authorArgs, out Runtime.Object result)
         {
             result = null;
             var container = new Runtime.Container ();
@@ -272,12 +287,16 @@ namespace Ink.Parsed
                 } else {
                     container.AddContent (new Runtime.VariablePointerValue (root));
                 }
-                for (int i = 1; i < pathNames.Count - 1; i++) {
-                    if (pathNames [i] == "static")
+                for (int i = 1; i < comps.Count - 1; i++) {
+                    if (comps [i].name == "static" && !comps [i].isDynamic)
                         continue;
-                    container.AddContent (new Runtime.StructFieldGet (pathNames [i]));
+                    StructPathCodegen.GenerateFieldGet (container, comps [i]);
                 }
             }
+
+            var stitchId = comps [comps.Count - 1];
+            if (stitchId.isDynamic)
+                StructPathCodegen.GenerateNameOntoStack (container, stitchId);
 
             if (arguments != null) {
                 for (var i = 0; i < arguments.Count; ++i) {
@@ -298,6 +317,11 @@ namespace Ink.Parsed
             int argc = arguments != null ? arguments.Count : 0;
             string basePath = null;
             if (isBase) {
+                if (stitchName == null) {
+                    Error ("-> base.{...} is not supported; base stitch diverts need a literal name");
+                    result = Runtime.ControlCommand.Done ();
+                    return true;
+                }
                 var enclosing = Story.ClosestStructStitch (this);
                 var structDecl = enclosing?.parent as StructDeclaration;
                 if (structDecl != null && structDecl.stitchBaseCallPaths != null)
@@ -309,6 +333,41 @@ namespace Ink.Parsed
             container.AddContent (_structStitchDivert);
             result = container;
             return true;
+        }
+
+        Runtime.Object GenerateDivertFromDynamicPath ()
+        {
+            var container = new Runtime.Container ();
+
+            bool requiresArgCodeGen = arguments != null && arguments.Count > 0;
+            if (requiresArgCodeGen || isFunctionCall || isTunnel || isThread) {
+                if (requiresArgCodeGen && !isFunctionCall)
+                    container.AddContent (Runtime.ControlCommand.EvalStart ());
+
+                if (requiresArgCodeGen) {
+                    for (var i = 0; i < arguments.Count; ++i)
+                        arguments [i].GenerateIntoContainer (container);
+                }
+
+                if (requiresArgCodeGen && !isFunctionCall)
+                    container.AddContent (Runtime.ControlCommand.EvalEnd ());
+
+                if (isThread)
+                    container.AddContent (Runtime.ControlCommand.StartThread ());
+                else if (isFunctionCall || isTunnel) {
+                    runtimeDivert.pushesToStack = true;
+                    runtimeDivert.stackPushType = isFunctionCall ? Runtime.PushPopType.Function : Runtime.PushPopType.Tunnel;
+                }
+            }
+
+            // Build path string then divert
+            container.AddContent (Runtime.ControlCommand.EvalStart ());
+            StructPathCodegen.GeneratePathStringOntoStack (container, target.components);
+            container.AddContent (Runtime.ControlCommand.EvalEnd ());
+
+            runtimeDivert.pathFromStack = true;
+            container.AddContent (runtimeDivert);
+            return container;
         }
 
         // When the divert is to a target that's actually a variable name
@@ -387,10 +446,9 @@ namespace Ink.Parsed
             }
 
             // Late detection: GenerateRuntimeObject may have run before structs were registered
-            if (_structStitchDivert == null && target != null && target.components != null && target.components.Count >= 2) {
-                var pathNames = new List<string> ();
-                foreach (var c in target.components)
-                    pathNames.Add (c.name);
+            if (_structStitchDivert == null && target != null && target.components != null && target.components.Count >= 2
+                && !StructPathCodegen.HasDynamicComponent (target.components)) {
+                var pathNames = StructPathCodegen.PathNames (target.components);
                 if (context.IsStructStitchDivertPath (pathNames, this)) {
                     // Should not happen if story was available during codegen
                     Error ("Internal error: struct stitch divert was not generated for '" + target.dotSeparatedComponents + "'");
@@ -404,6 +462,11 @@ namespace Ink.Parsed
                 }
                 int argc = arguments != null ? arguments.Count : 0;
                 context.ValidateStructStitchDivert (_structStitchPathNames, this, argc);
+                return;
+            }
+
+            if (runtimeDivert != null && runtimeDivert.pathFromStack) {
+                base.ResolveReferences (context);
                 return;
             }
 

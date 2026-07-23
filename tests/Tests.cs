@@ -5161,6 +5161,53 @@ VAR bag: Bag
             Assert.IsTrue(bag.value.HasMethod("Bonus"));
         }
 
+        [Test()]
+        public void TestEvaluatedDotAccessOnStructDynamicAndPath()
+        {
+            var story = CompileString(@"
+=== struct Character ===
+VAR name = ""anon""
+VAR nerves = 1
+= function Mood() =
+~ return self.nerves
+= intro
+Hello from {self.name}
+->->
+===
+=== dynamic Bag ===
+VAR score = 0
+= function Bonus() =
+~ return self.score + 1
+===
+VAR hero: Character
+VAR bag: Bag
+VAR fieldName = ""name""
+VAR methodName = ""Mood""
+VAR stitchName = ""intro""
+VAR knotStitch = ""there""
+VAR slotName = ""score""
+
+-> start
+=== start ===
+{hero.{fieldName}}
+~ hero.{fieldName} = ""Sam""
+{hero.{fieldName}}
+~ fieldName = ""nerves""
+~ hero.{fieldName} = 3
+{hero.{methodName}()}
+-> hero.{stitchName} ->
+{bag.{slotName}}
+~ bag.{slotName} = 9
+{bag.Bonus()}
+-> place.{knotStitch}
+=== place ===
+= there
+arrived
+-> END
+");
+            Assert.AreEqual("anon\nSam\n3\nHello from Sam\n0\n10\narrived\n", story.ContinueMaximally());
+        }
+
         private class TestWarningException : System.Exception
         { }
     }

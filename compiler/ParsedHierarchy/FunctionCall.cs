@@ -184,14 +184,13 @@ namespace Ink.Parsed
             if (comps == null || comps.Count < 2)
                 return false;
 
-            var pathNames = new List<string> ();
-            foreach (var c in comps)
-                pathNames.Add (c.name);
+            var pathNames = StructPathCodegen.PathNames (comps);
 
             if (!IsStructMethodCallPath (story, pathNames, this))
                 return false;
 
-            string methodName = comps [comps.Count - 1].name;
+            var methodId = comps [comps.Count - 1];
+            string methodName = methodId.isDynamic ? null : methodId.name;
             bool isBase = comps [0].name == "base";
 
             // Push receiver as pointer
@@ -207,11 +206,14 @@ namespace Ink.Parsed
                 }
                 // Intermediate fields: party.scout.Method
                 for (int i = 1; i < comps.Count - 1; i++) {
-                    if (comps [i].name == "static")
+                    if (comps [i].name == "static" && !comps [i].isDynamic)
                         continue;
-                    container.AddContent (new Runtime.StructFieldGet (comps [i].name));
+                    StructPathCodegen.GenerateFieldGet (container, comps [i]);
                 }
             }
+
+            if (methodId.isDynamic)
+                StructPathCodegen.GenerateNameOntoStack (container, methodId);
 
             // Explicit arguments (self is implicit)
             if (arguments != null) {
@@ -222,6 +224,10 @@ namespace Ink.Parsed
             int argc = arguments != null ? arguments.Count : 0;
             string basePath = null;
             if (isBase) {
+                if (methodName == null) {
+                    Error ("base.{...}() is not supported; base calls need a literal method name");
+                    return true;
+                }
                 var method = ClosestStructMethod ();
                 var structDecl = method?.parent as StructDeclaration;
                 if (structDecl != null && structDecl.baseCallPaths != null)
@@ -284,9 +290,7 @@ namespace Ink.Parsed
 
             var comps = _proxyDivert.target?.components;
             if (comps != null && comps.Count >= 2) {
-                var pathNames = new List<string> ();
-                foreach (var c in comps)
-                    pathNames.Add (c.name);
+                var pathNames = StructPathCodegen.PathNames (comps);
 
                 if (IsStructMethodCallPath (context, pathNames, this)) {
                     if (arguments != null) {
@@ -298,7 +302,9 @@ namespace Ink.Parsed
                         var method = ClosestStructMethod ();
                         var structDecl = method?.parent as StructDeclaration;
                         string methodName = pathNames [pathNames.Count - 1];
-                        if (structDecl == null || structDecl.baseCallPaths == null || !structDecl.baseCallPaths.ContainsKey (methodName)) {
+                        if (methodName == null) {
+                            Error ("base.{...}() is not supported; base calls need a literal method name");
+                        } else if (structDecl == null || structDecl.baseCallPaths == null || !structDecl.baseCallPaths.ContainsKey (methodName)) {
                             Error ("base." + methodName + "() is only valid inside an overriding method");
                         }
                     } else {
