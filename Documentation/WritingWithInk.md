@@ -40,11 +40,12 @@
 	 * [8) Summary](#8-summary)
    * [Part 6: Structs](#part-6-structs)
      * [1) Defining a struct](#1-defining-a-struct)
-     * [2) Instances](#2-instances)
-     * [3) Fields and methods](#3-fields-and-methods)
+     * [2) Fields and methods](#2-fields-and-methods)
+     * [3) Instances](#3-instances)
      * [4) Inheritance](#4-inheritance)
      * [5) References (REFVAR)](#5-references-refvar)
-     * [6) Summary](#6-summary)
+     * [6) Dynamics (open slots)](#6-dynamics-open-slots)
+     * [7) Summary](#7-summary)
    * [Part 7: International character support in identifiers](#part-7-international-character-support-in-identifiers)
 </details>
 
@@ -3404,244 +3405,364 @@ Example:
 
 # Part 6: Structs
 
-Lists are excellent for tracking discrete story states. **Structs** are for *entities* — characters, items, factions — that need several fields and shared behaviour in one place.
+**Structs** are *things* — characters, items, factions — that need several traits and shared behaviour in one place. Imagine in vanilla ink you want to track if you have met a certain character, you would end up with:
+```ink
+VAR met_claudia = false
+VAR met_johnson = false
+VAR met_estelle = false
 
-A struct groups fields, methods, and optional narrative stitches. You declare typed variables that hold instances, read and write fields with dotted paths, call methods on those instances, and divert/tunnel into stitches. Inheritance lets subtypes override defaults, methods, and stitches.
+Met Estelle ? {met_estelle}
+```
+With structs:
+```ink
+=== struct Character ===
+VAR met = false
+===
+VAR Claudia : Character 
+VAR Johnson : Character
+VAR Estelle : Character
 
-Structs are not narrative entry points: you cannot `-> SomeStruct` the way you divert to a knot. Methods are functions (call with `~ instance.Method()`). Narrative stitches are divert targets (`-> instance.stitch`), not function calls.
+Met Estelle ? {Estelle.met}
+```
+So, structs are a nice way to organize your content. Though it has much more potential than just a handy folder.
+
+If you are familiar with Lua tables, then you may find structs somewhat familiar.
 
 ## 1) Defining a struct
 
-Use knot-shaped syntax with the `struct` keyword. Put **fields before members**. Methods are function stitches; narrative stitches omit `function`:
+Struct definition is similar to knots, but you need to use the `struct` keyword. You can then declare fields (traits) using `VAR` and `REFVAR`. Finally, you can declare `function`s and normal stitches using the stitch syntax. Note that fields must always come before functions and stitches
 
-	=== struct Character ===
-	VAR name = "anonymous"
-	VAR nerves = 1
-	= function ReactFurious() =
-	The heck you are doing?
-	~ return
+```ink
+=== struct Character ===
+VAR name = "anonymous"
+VAR nerves = 1
+= function React() =
+The heck you are doing?
+~ return
 
-	=== struct Scene ===
-	VAR title = "..."
-	= intro(who)
-	{self.title}: Hello, {who}!
-	->->
+=== struct Scene ===
+VAR title = "..."
+= intro(who)
+{self.title}: Hello, {who}!
+->->
+```
 
-Rules of thumb:
+When naming fields, functions and stitches, there are some rules:
 
-- Field, method, and stitch names must be unique within the struct (including inherited members). A name cannot be both a method and a stitch.
-- `self`, `base`, and `static` are reserved and cannot be field or member names.
+- Field, method, and stitch names must be unique within the struct (including inherited members). A name cannot be both a method and a stitch nor function.
+- `self`, `base`, and `static` are reserved keywords and cannot be field or member names.
 - `EXTERNAL` lines are allowed inside a struct (same idea as for ordinary functions); a matching function stitch can act as a fallback when the game has not bound the external.
 
-Close a struct with a boundary of **three or more** `=` characters (`===`, `====`, …) before any top-level content that would otherwise look like more fields (especially typed globals). A following knot or struct title (`=== start ===`, `=== struct Other ===`) also ends the body. Without that marker, a `VAR` after the fields is treated as another field:
+You can close a struct with a boundary of **three or more** `=` characters (`===`, `====`, …) before any top-level content that would otherwise look like more fields (especially typed globals). A following knot or struct title (`=== start ===`, `=== struct Other ===`) also ends the body. Without that marker, a `VAR` after the fields is treated as another field:
 
-	=== struct Character ===
-	VAR name = "anonymous"
-	= function Speak() =
-	Hello!
-	~ return
-	===
-	VAR hero: Character
+```ink
+=== struct Character ===
+VAR name = "anonymous"
+= function Speak() =
+Hello!
+~ return
+=== // struct ends here
+VAR hero: Character
+```
 
-## 2) Instances
+## 2) Fields and methods
+
+Once a struct is defined, you reach into it with a dotted path — the same idea as `visit_paris.met_estelle` for stitches, but for data and behaviour living on the struct.
+
+### Reading and writing fields
+
+The simplest thing you can do is read and write fields. Outside the struct body, the bare type name (`Character`) refers to that type's default instance, so you can try things immediately:
+
+```ink
+{Character.name}
+~ Character.name = "Emilia"
+~ Character.nerves++
+{Character.nerves}
+```
+
+If a field is itself another struct, keep chaining dots — `party.leader.name` — and assigning into that nested field replaces the nested value with a deep copy. (Creating named instances like `Oswald` is covered in the next section; the dotted syntax is the same either way.)
+
+### Calling methods
+
+Methods are the function stitches you declared with `= function ... =`. You call them with `~` like any other ink function, but through the instance:
+
+```ink
+~ Character.React()
+```
+
+Inside a method, the instance you called it on arrives as an implicit `ref self`. Fields and sibling methods are **not** in scope as bare names — bare names still mean ordinary globals, temps, and top-level functions. You always go through `self` (Python-style):
+
+```ink
+=== struct Character ===
+VAR name = "anonymous"
+= function Introduce() =
+My name is {self.name}.
+~ self.React()
+~ return
+= function React() =
+The heck you are doing?
+~ return
+```
+
+So `name` alone would look for a global called `name`; `self.name` is this character's field. That keeps methods from accidentally shadowing story-wide variables.
+
+### Narrative stitches
+
+Not everything on a struct has to be a function. If you declare a stitch *without* the `function` keyword, it is a normal narrative stitch: you divert or tunnel into it, it can print text and offer choices, and it still receives `self`.
+
+```ink
+=== struct Scene ===
+VAR title = "..."
+= intro(who)
+{self.title}: Hello, {who}!
+->->
+===
+
+-> Scene.intro("traveller") ->
+```
+
+You cannot call a narrative stitch as `~ Scene.intro()` — it is divert-only. Likewise, you cannot divert into a method. Pick the form that matches how you want to enter the content.
+
+Stitches can take parameters (the author-facing signature above is just `who`), and they can tunnel back with `->->` like any other stitch. Overriding stitches when you inherit is covered in [Inheritance](#4-inheritance).
+
+## 3) Instances
 
 ### Default instance
 
-Every struct type has an implicit **default instance**. Outside of a struct body, the bare type name refers to that default:
+When you declare a struct, you've also created an implicit **default instance**. When outside of the struct definition, you can use the struct name to access this default instance:
 
-	{Character.name}
-	~ Character.ReactFurious()
+```ink
+{Character.name}
+~ Character.React()
+```
 
 Field initializers in the struct body set the default instance’s starting values. New instances copy those defaults unless you give another initializer.
 
 ### Typed globals and temps
 
-	// Copy from Character's default instance
-	VAR Oswald: Character
+You can make an instance of a struct by using `VAR instanceName : StructName` (or `TEMP`). For instance:
 
-	// Copy from another instance (deep copy of embedded fields)
-	VAR Clone: Character = Oswald
+```ink
+VAR Oswald: Character
+```
 
-	~ Oswald.name = "Flinn Oswald"
+What happens here is that Oswald is now a Character, it has **a copy** of all the fields and values from the Character struct. This is a **deep copy**.
 
-	~ temp guest: Character = Oswald
-	~ guest.name = "Visitor"
-	// Oswald.name is still "Flinn Oswald"
+You can also make a clone of Oswald by making Oswald the default value of another instance:
 
-Assignment of a whole struct value deep-copies embedded (`VAR`) fields. See [References (REFVAR)](#5-references-refvar) for reference fields.
+```ink
+// Copy from another instance (deep copy of embedded fields)
+VAR Clone: Character = Oswald
+```
+
+What "deep copy" practically means is that, if you change the value on the original copy, it is not reflected on your clone:
+
+```ink
+~ Oswald.name = "Oswald"
+~ temp guest: Character = Oswald
+~ guest.name = "Visitor"
+// Oswald.name is still "Oswald"
+```
+
+We will see "copy by reference" later in [References (REFVAR)](#5-references-refvar). 
 
 Temps work the same way as globals for field access and method calls, but they are not saved with story state and are not visible to the game engine through `variablesState`.
 
 ### Function parameters
 
-	=== function Greet(who: Character) ===
-	{who.name} waves.
-	~ return
+You can pass struct instances to functions as parameters. You can also specify the parameter type using `:`. 
 
-	=== function Rename(ref who: Character, newName) ===
-	~ who.name = newName
-	~ return
+```ink
+=== function Greet(who: Character) ===
+{who.name} waves.
+~ return
+```
 
-Without `ref`, the callee receives a deep copy. With `ref`, the callee mutates the caller’s instance (same as ordinary ink `ref` parameters).
+Note that, like variables, parameters are deep-copied if you pass them like the previous example. To avoid this, use `ref`:
 
-## 3) Fields and methods
+```ink
+=== function Rename(ref who: Character, newName) ===
+~ who.name = newName
+~ return
+```
 
-### Reading and writing fields
-
-	VAR Oswald: Character
-	~ Oswald.name = "Flinn"
-	{Oswald.name}
-	~ Oswald.nerves++
-
-Nested struct fields use the same dotted paths. Assigning into an embedded struct field replaces that nested value (deep copy).
-
-### Calling methods
-
-	~ Oswald.ReactFurious()
-
-Methods receive an implicit `ref self` as their first parameter. Access to fields and sibling methods on that instance is **always explicit** (Python-style): bare names resolve as ordinary globals / temps / functions, not as members.
-
-	=== struct Character ===
-	VAR name = "anonymous"
-	= function Introduce() =
-	My name is {self.name}.
-	~ self.OtherMethod()
-	~ return
-	= function OtherMethod() =
-	~ return
-
-You can also call a method on the default instance: `~ Character.Introduce()`.
-
-### Calling a base implementation
-
-When a subtype overrides a method, use `base` to call the inherited version:
-
-	=== struct Oswald: Character ===
-	VAR name = "Flinn Oswald"
-	= function ReactFurious() =
-	~ base.ReactFurious()
-	Oh my goodness me!
-	~ return
-
-`base.SomeMethod(...)` only works inside a method that overrides `SomeMethod`.
-
-### Narrative stitches
-
-Declare stitches without `function`. Enter them with jump or tunnel; they get implicit `ref self` and may take parameters (the author-facing signature):
-
-	=== struct Scene ===
-	VAR title = "Base"
-	= intro(who)
-	{self.title} greets {who}.
-	->->
-	===
-
-	=== struct BossScene: Scene ===
-	VAR title = "Boss"
-	= intro(who)
-	-> base.intro(who) ->
-	The boss glowers.
-	->->
-	===
-
-	VAR fight: BossScene
-	-> fight.intro("hero") ->
-
-- Override requires the same name and the same author-facing parameter signature as the inherited stitch.
-- `-> base.stitch` / `-> base.stitch ->` only works inside a stitch that overrides that name.
-- Stitches may contain choices and sibling divert targets (`-> wave`); they cannot be called as `~ fight.intro()`.
+Again, see [References (REFVAR)](#5-references-refvar) for a deeper understanding of this behaviour.
 
 ## 4) Inheritance
 
-A struct can list one or more base types after a colon:
+Structs get more interesting when one kind of thing *is also* another kind of thing. Oswald is a Character — but perhaps he is also a suspect in the case. Inheritance lets you say that without copying every field and method by hand.
 
-	=== struct ISuspect ===
-	= function IsSuspect() =
-	~ return true
+You list one or more base types after a colon:
 
-	=== struct Oswald: Character, ISuspect ===
-	VAR name = "Flinn Oswald"
+```ink
+=== struct ISuspect ===
+= function IsSuspect() =
+~ return true
 
-- Redeclared fields override the inherited **default value**.
-- Redeclared methods override the inherited implementation (virtual dispatch uses the instance’s concrete type).
-- Redeclared narrative stitches override when the author-facing signature matches (virtual divert/tunnel uses the concrete type).
-- Multiple inheritance is allowed; methods, stitches, and fields are merged in declaration order of the bases, with the child’s own members winning.
+=== struct Oswald: Character, ISuspect ===
+VAR name = "Flinn Oswald"
+```
 
-A variable typed as a base can hold a subtype instance. Method calls on it are still virtual:
+`Oswald` now has everything `Character` and `ISuspect` provide, plus whatever it declares itself. If it redeclares a field, that overrides the inherited **default value**. If it redeclares a method (or a narrative stitch with the same author-facing signature), that overrides the inherited implementation.
 
-	VAR someone: Character = Oswald
-	~ someone.ReactFurious()
-	// runs Oswald's override if Oswald redefined it
+### Calling the base version
 
-### Runtime type checks
+Often you want to extend behaviour rather than replace it entirely. Inside an overriding method, `base` reaches the inherited implementation:
 
-Use `is` / `isnt` to test an instance against a struct type (including bases / mixins). The right-hand side is usually a bare type name (the default instance):
+```ink
+=== struct Oswald: Character ===
+VAR name = "Flinn Oswald"
+= function React() =
+~ base.React()
+Oh my goodness me!
+~ return
+```
 
-	{Oswald is Character}
-	{Oswald is ISuspect}
-	{someone isnt Oswald}
+So Oswald still does whatever `Character.React` does, then adds his own line. `base.SomeMethod(...)` only works inside a method that overrides `SomeMethod` — there is no free-floating `base` elsewhere. Narrative stitches work the same way with `-> base.intro(who) ->` (or a jump) from inside the overriding stitch.
 
-`REFVAR` targets are followed automatically, same as field access and method calls.
+### Virtual calls and type tests
+
+A variable typed as a base can hold a subtype instance. Method and stitch lookup still uses the *concrete* type sitting in that variable:
+
+```ink
+VAR someone: Character = Oswald
+~ someone.React()
+// runs Oswald's React, not only Character's
+```
+
+That is usually what you want: treat people uniformly as `Character`, but let Oswald (or Estelle) specialise how they react.
+
+To ask what you actually have at runtime, use `is` / `isnt`. The right-hand side is typically a bare type name (the default instance):
+
+```ink
+{Oswald is Character}
+{Oswald is ISuspect}
+{someone isnt Oswald}
+```
+
+`Oswald is Character` is true because Oswald inherits Character. `is ISuspect` is true because of the mixin. Bases are merged in the order you listed them, with the child's own members winning when names collide.
 
 ## 5) References (REFVAR)
 
-Ordinary struct fields and typed `VAR`s are **values**: assignment and parameter passing (without `ref`) deep-copy embedded data.
+We've already seen fields and variables that are declared with `VAR`, and the canonical parameter passing in functions. These will always do *deep copy* that duplicates the values on an original instance. But, what if you want a *reference*? If you write something like:
 
-`REFVAR` stores a **reference** to another global instance (or `none`), not a nested copy. It can be a field inside a struct, or a top-level global:
+```ink
+=== struct Character ===
+VAR met = false
+===
+VAR Oswald : Character
+VAR Twinks : Character
+VAR PersonInTheRoom : Character = Oswald
+~Oswald.met = true
+// Question: Have you met the person in the room?
+{PersonInTheRoom.met}
+```
 
-	=== struct Party ===
-	VAR leader: Character = Character
-	REFVAR scout: Character = none
+Take a moment to understand what happened in this example: you create Oswald and Twinks, both instances of Character, each have their own `met` fields set to false as copied from the Character default instance. And then you created `PersonInTheRoom`, which you are still using the `VAR` syntax, and assign the default value as Oswald. Now, similarly, `PersonInTheRoom` now deep copies Oswald, *makes it effectively a different character*. So if you set the `met` to true on `Oswald`, this will not be reflected on `PersonInTheRoom` - the answer is no, you have not met the person in the room, even if its default value is Oswald. He's a twin that looks identical to Oswald, but fundamentally a different person.
 
-	VAR Oswald: Oswald
-	VAR party: Party
-	REFVAR active: Character = none
+To solve this problem, `REFVAR` is introduced. `REFVAR` stores a **reference** to another global instance (or `none`), not a nested copy. It can be a field inside a struct, or a top-level global:
 
-	~ party.scout = Oswald
-	~ active = Oswald
-	~ party.scout.ReactFurious()
-	~ active.ReactFurious()
-	{party.scout.name}
-	{active.name}
+```ink
+=== struct Character ===
+VAR met = false
+===
+VAR Oswald : Character
+VAR Twinks : Character
+// the magic happens here:
+REFVAR PersonInTheRoom : Character = Oswald
+```
 
-Rebinding `party.scout` or `active` changes which global is referred to; it does not copy Oswald. Clearing a reference:
+Now `PersonInTheRoom` is just like a chair on which your characters can sit instead of a clone bay, it becomes an alias of whoever sitting on it, in this case, Oswald. Anything you do to Oswald will reflect on `PersonInTheRoom`, and everything you do to `PersonInTheRoom` will reflect on Oswald:
 
-	~ party.scout = none
-	~ active = none
+```ink
+~ PersonInTheRoom.met = true
+{Oswald.met} // true
 
-`REFVAR` targets must be globals the engine (and save system) can resolve by name. Prefer `REFVAR` when several structs should share the same live instance.
+// and vice-versa
+~ Oswald.met = false
+{PersonInTheRoom.met} // now false
+```
+
+If you let Twinks sit on that chair:
+
+```ink
+~ Twinks.met = true
+~ PersonInTheRoom = Twinks // this will not copy Twinks!
+{PersonInTheRoom.met} // true
+```
+
+Of course, you may not need anyone to sit on the chair, in that case, you clear with `none`:
+
+```ink
+~ PersonInTheRoom = none
+```
+
+`REFVAR` targets must be globals the engine (and save system) can resolve by name, so you should not assign a temp value to a REFVAR. 
 
 ## 6) Dynamics (open slots)
 
-A **dynamic** is like a struct whose instance can grow and shrink at runtime. The compile-time layout in `structDefs` stays fixed; the live instance (including the type-named default global) can add, remove, and retarget slots.
+Structs are closed boxes: once you compile them, every instance has the same set of fields and methods. That is usually what you want for characters and items.
 
-	=== dynamic Bag ===
-	VAR score = 0
-	= function Bonus() =
-	~ return self.score + 1
-	===
-	VAR bag: Bag
-	VAR scratch: dynamic
+Sometimes, though, you want a bag you can stuff new things into as the story unfolds — temporary tags, ad-hoc counters, a method you swap out for a scene. That is a **dynamic**: it looks and feels like a struct, but its live instance can gain and lose slots at runtime. Be very careful whether to adopt this feature, it is powerful, but also, a can of worms that can become hard to reason about and is tricky to debug!
 
-	~ bag.extra = 5
-	{bag has extra}
-	~ bag.extra = []
-	{bag hasnt extra}
+You declare one with `=== dynamic Name ===` instead of `struct`:
 
-	~ bag.Bonus = -> Bag.static.Bonus
-	~ scratch.x = 1
+```ink
+=== dynamic Bag ===
+VAR score = 0
+= function Bonus() =
+~ return self.score + 1
+===
 
-Rules:
+VAR bag: Bag
+```
 
-- Declare with `=== dynamic Name ===` (may inherit `struct` or `dynamic` bases). A `struct` **cannot** inherit a `dynamic`.
-- `VAR x: dynamic` / `temp x: dynamic` creates an empty dynamic whose type identity is the variable name (`x`).
-- Dot access on a dynamic does **not** fail at compile time. Reading or calling a missing slot is a **runtime** error; assigning a new name creates that slot.
-- Remove a slot with `~ instance.slot = []` (empty `()` remains an empty **list** literal).
-- Method slots hold divert targets to compiled functions (`~ d.M = -> Type.static.M`). Calls still push `self`.
-- Evaluated path components: `instance.{nameVar}`, `-> knot.{stitchVar}`, and `instance.{methodVar}()` use the string result of the brace expression as the field, stitch, or method name.
-- `{x is dynamic}` / `{x is struct}` test kind (not inheritance). `{x is SomeType}` still walks bases.
-- `{x has slot}` / `{x hasnt slot}` test whether a field or method slot is present.
-- `REFVAR r: dynamic` only accepts dynamics; untyped `REFVAR r` accepts struct or dynamic; typed `REFVAR r: SomeStruct` rejects dynamics. Adding/removing slots on a closed struct is an error.
+So far this behaves like a struct: `bag` starts with `score` and `Bonus`. The difference shows up when you invent a name that was never in the definition:
+
+```ink
+~ bag.extra = 5
+{bag.extra}
+```
+
+That assignment *creates* the `extra` slot. Reading or calling a name that does not exist yet is a **runtime** error (the compiler will not catch missing dynamic members the way it does for closed structs). To ask whether a slot is present, use `has` / `hasnt`:
+
+```ink
+{bag has extra}
+~ bag.extra = []
+{bag hasnt extra}
+```
+
+Assigning `[]` removes the slot. (Watch the brackets: empty `()` is still an empty **list** literal in ink, not "delete this".)
+
+### Empty dynamics and method slots
+
+You can also start from a blank slate:
+
+```ink
+VAR scratch: dynamic
+~ scratch.x = 1
+```
+
+`VAR x: dynamic` (or `temp`) creates an empty dynamic whose type identity is the variable's own name. Useful for throwaway open objects.
+
+Method slots are divert targets to compiled functions. You can retarget them the same way you assign fields:
+
+```ink
+~ bag.Bonus = -> Bag.static.Bonus
+```
+
+Calls still pass `self`, so a swapped-in method behaves like any other method on that instance. You can also build paths from string values with brace expressions — `bag.{fieldName}`, `bag.{methodName}()`, `-> knot.{stitchName}` — when the name itself comes from a variable.
+
+### How dynamics relate to structs
+
+A few rules of thumb keep the two kinds from fighting each other:
+
+- A `dynamic` may inherit a `struct` or another `dynamic`. A `struct` **cannot** inherit a `dynamic` — closed types stay closed.
+- `{x is dynamic}` / `{x is struct}` test the *kind* of value. `{x is SomeType}` still walks ordinary inheritance.
+- `REFVAR r: dynamic` only accepts dynamics; a typed `REFVAR r: SomeStruct` rejects them. An untyped `REFVAR r` can hold either.
+- Trying to add or remove slots on a closed struct is an error — open that behaviour only on dynamics.
+
+If Lua tables felt familiar for structs, dynamics are the closer cousin: a fixed shape for the defaults you authored, plus room to grow when the story needs it.
 
 ## 7) Summary
 
