@@ -10,6 +10,11 @@
 
 Usually these features are not required to make a game. We suggest that you get familiar with vanilla ink first then see if Sumi has features that seem interesting to you.
 
+## The Sumi Toolchain
+
+- [Sumy](https://github.com/Myonmu/sumy) : Inky but sumi compatible
+- [Sumi Unity Integration](https://github.com/Myonmu/sumi-unity-integration)
+
 ## Preprocessor Directives
 
 The syntax is similar to C# preprocessors:
@@ -27,9 +32,9 @@ This will be shown if not in Inky nor Unity.
 This is helpful if you are including libraries that might have different paths when editing with Inky and in runtime, or debug content.
 ```ink
 #IF INKY
-#INCLUDE "../InkLibs/Library.ink"
+INCLUDE ../InkLibs/Library.ink
 #ELSE
-#INCLUDE "Library.ink"
+INCLUDE Library.ink
 #ENDIF
 ```
 `InkPreprocessor` will resolve these directives after comment removal, and before compiling the main content. To keep line numbers intact, the preprocessor *replaces* masked out branches with line breaks, so you would end up with more empty line than you might expect. Hence, always check if a line has printable content before showing it to the player. 

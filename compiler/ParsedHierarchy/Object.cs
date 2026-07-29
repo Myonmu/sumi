@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Text;
 
 namespace Ink.Parsed
@@ -266,7 +266,7 @@ namespace Ink.Parsed
                 }
             }
             return null;
-        }
+    }
 
 
         public List<T> FindAll<T>(FindQueryFunc<T> queryFunc = null) where T : class
